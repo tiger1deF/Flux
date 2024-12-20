@@ -28,12 +28,8 @@ from agents.models import AgentState, AgentConfig, AgentStatus, Logging
 from llm import (
     LLM,
     gemini_llm_async_inference,
-    gemini_generate_embedding,
-    BaseEmbeddingFunction
 )
 
-from agents.vectorstore.models import BaseVectorStore  
-from agents.vectorstore.default.store import HNSWStore
 
 from agents.monitor.logger import AgentLogger, AgentLogHandler
 from agents.monitor.agent_logs import AgentLog
@@ -86,14 +82,8 @@ class Agent(BaseModel):
     :type source_agents: List[Agent]
     :ivar target_agents: List of downstream agents
     :type target_agents: List[Agent]
-    :ivar chat_agents: List of agents for chat interactions
-    :type chat_agents: List[Agent]
     :ivar llm: Language model interface
     :type llm: LLM
-    :ivar embed: Embedding function
-    :type embed: BaseEmbeddingFunction
-    :ivar vector_store: Vector store for embeddings
-    :type vector_store: BaseVectorStore
     :ivar logging: Whether logging is enabled
     :type logging: bool
     :ivar logger: Agent logger instance
@@ -118,11 +108,8 @@ class Agent(BaseModel):
    
     source_agents: List['Agent'] = Field(default_factory = list)
     target_agents: List['Agent'] = Field(default_factory = list)
-    chat_agents: List['Agent'] = Field(default_factory = list)
-    
+
     llm: LLM = Field(default_factory = lambda: LLM(gemini_llm_async_inference))
-    embed: BaseEmbeddingFunction = Field(default_factory = lambda: BaseEmbeddingFunction(gemini_generate_embedding))
-    vector_store: BaseVectorStore = Field(default = None)
         
     logging: bool = Field(default = True)
     logger: Optional[AgentLogger] = None
@@ -149,8 +136,6 @@ class Agent(BaseModel):
         """
         super().__init__(*args, **kwargs)
 
-        self.vector_store = HNSWStore(embedding_function = self.embed)
-        
         if self.logging:
             self.agent_log = AgentLog(
                 session_id = self.session_id,

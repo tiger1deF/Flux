@@ -24,7 +24,7 @@ from llm import (
 from agents.vectorstore.models import BaseEmbeddingStore  
 from agents.vectorstore.default.store import HNSWStore
 
-from agents.Tools.models import Tool, ToolParameter
+from agents.tools.models import Tool, ToolParameter
 from agents.monitor.logger import AgentLogger, AgentLogHandler
 from agents.monitor.agent_logs import AgentLog
 

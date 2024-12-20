@@ -7,6 +7,7 @@ Agent Logs
    :members:
    :undoc-members:
    :show-inheritance:
+   :special-members: __init__
 
 Logger Implementation
 ------------------
@@ -14,34 +15,31 @@ Logger Implementation
    :members:
    :undoc-members:
    :show-inheritance:
-
-Log Handler
----------
-.. autoclass:: agents.monitor.logger.AgentLogHandler
-   :members:
-   :undoc-members:
-   :show-inheritance:
+   :special-members: __init__
 
 Logging Wrappers
 --------------
 
 Default Wrapper
-^^^^^^^^^^^^^
+~~~~~~~~~~~~~
 .. automodule:: agents.monitor.wrappers.default
    :members:
    :undoc-members:
    :show-inheritance:
+   :special-members: __init__
 
 Langfuse Wrapper
-^^^^^^^^^^^^^
+~~~~~~~~~~~~~~
 .. automodule:: agents.monitor.wrappers.langfuse
    :members:
    :undoc-members:
    :show-inheritance:
+   :special-members: __init__
 
-Logging Wrapper
-^^^^^^^^^^^^
+Basic Logging Wrapper
+~~~~~~~~~~~~~~~~~~
 .. automodule:: agents.monitor.wrappers.logging
    :members:
    :undoc-members:
    :show-inheritance:
+   :special-members: __init__

@@ -16,7 +16,7 @@ from .agent.models import Agent
 
 from .messages.models import Message, Sender
 
-from .Tools.models import Tool, ToolParameter
+from .tools.models import Tool, ToolParameter
 
 from .vectorstore.models import BaseVectorStore
 from .vectorstore.default.store import HNSWStore

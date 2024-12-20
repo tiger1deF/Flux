@@ -4,17 +4,24 @@ Agents
 .. toctree::
    :maxdepth: 2
 
-   agent
-   messages
+   core
+   chat
    tools
    vectorstore
    monitor
-   models
+   messages
 
-Core Agent Components
--------------------
-
+Core Components
+-------------
 .. automodule:: agents
    :members:
    :undoc-members:
-   :show-inheritance: 
+   :show-inheritance:
+
+Base Models
+----------
+.. automodule:: agents.models
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :special-members: __init__

@@ -20,7 +20,6 @@ def test_base_agent():
     import asyncio
     from agents import (
         Agent,
-        HNSWStore,
         Message,
         AgentConfig,
         AgentState,
@@ -28,8 +27,6 @@ def test_base_agent():
     )
 
     from llm import (
-        BaseEmbeddingFunction, 
-        gemini_generate_embedding,
         LLM,
         pulse_llm_async_inference
     )
@@ -45,9 +42,6 @@ def test_base_agent():
         max_tokens = 2000,
         system_prompt = "You must respond like a pirate"
     )
-    
-    embedder = BaseEmbeddingFunction(gemini_generate_embedding)
-    store = HNSWStore(embedding_function = embedder)
         
     print(f'Testing langfuse langchain agent')
     config = AgentConfig(
@@ -58,7 +52,6 @@ def test_base_agent():
     agent = Agent(
         name = "Test Agent",
         llm = llm,
-        vector_store = store,
         config = config
     )
     
@@ -83,7 +76,6 @@ def test_base_agent():
     agent = Agent(
         name = "Test Agent",
         llm = llm,
-        vector_store = store,
         config = config
     )
     
@@ -110,7 +102,6 @@ def test_base_agent():
     agent = Agent(
         name = "Test Agent",
         llm = llm,
-        vector_store = store,
         config = config
     )
     

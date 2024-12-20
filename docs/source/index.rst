@@ -5,12 +5,6 @@ Welcome to Flux Documentation
 .. warning::
    This is an alpha version (0.1) released December 2023. The API is still under heavy development and may change significantly. Use with caution in production environments.
 
-.. image:: _static/flux_logo.png
-   :alt: Flux Logo
-   :align: center
-
-|
-
 **Flux** is an advanced AI agent system that provides configurable agents with various capabilities, including LLM integration, vector storage, and monitoring.
 
 .. note::
@@ -65,10 +59,10 @@ Installation
 ===========
 
 .. code-block:: bash
-   :caption: Install via pip
+   :caption: Install from PyPI
    :emphasize-lines: 1
 
-   pip install -r requirements/requirements.txt
+   pip install flux-agents
 
 Quick Start
 ==========
@@ -77,7 +71,7 @@ Quick Start
    :caption: Basic agent usage
    :emphasize-lines: 11,19
 
-   from agents import Agent, Message, AgentConfig, Logging
+   from flux_agents import Agent, Message, AgentConfig, Logging
    
    # Create an agent with basic logging
    agent = Agent(

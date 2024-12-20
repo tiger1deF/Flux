@@ -22,9 +22,9 @@ from tests.agents import test_base_agent
 
 # PASSING TESTS
 
-#test_embeddings()
-#test_llm()
-#test_embeddings_store()
+test_embeddings()
+test_llm()
+test_embeddings_store()
 
 # WIP TESTS
 test_base_agent()

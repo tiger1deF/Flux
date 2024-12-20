@@ -19,7 +19,7 @@ __all__ = [
     'gemini_llm_sync_inference',
     'gemini_llm_async_inference',
     
-    'EmbeddingFunction',
+    'BaseEmbeddingFunction',
     'pulse_embeddings',
     'gemini_generate_embedding',
     'local_generate_embedding',

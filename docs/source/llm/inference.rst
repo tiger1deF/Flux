@@ -8,7 +8,7 @@ Pulse Inference
 -------------
 
 .. module:: llm.inference.pulse
-   :synopsis: Pulse model inference.
+   :synopsis: Pulse model inference implementations.
 
 Synchronous
 ~~~~~~~~~~
@@ -17,6 +17,7 @@ Synchronous
    :undoc-members:
    :show-inheritance:
    :special-members: __init__, __call__
+   :exclude-members: _get_internal_model_list
 
 Asynchronous
 ~~~~~~~~~~~
@@ -30,7 +31,7 @@ Gemini Inference
 --------------
 
 .. module:: llm.inference.gemini
-   :synopsis: Gemini model inference.
+   :synopsis: Gemini model inference implementations.
 
 Synchronous
 ~~~~~~~~~~

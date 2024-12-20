@@ -74,7 +74,7 @@ class ReactAgent(Agent):
         else:
             await self.logger.log_message(message)
 
-        self.state.messages[message_id] = message
+        self.messages[message_id] = message
 
 
     async def get_messages(
@@ -93,11 +93,11 @@ class ReactAgent(Agent):
         :rtype: List[Message]
         """
         if limit:
-            return self.state.messages.items()[:limit]
+            return self.messages.items()[:limit]
         elif ids:
-            return [self.state.messages[id] for id in ids]
+            return [self.messages[id] for id in ids]
         else:
-            return self.state.messages.items()
+            return self.messages.items()
 
 
     async def send_message(
@@ -150,7 +150,7 @@ class ReactAgent(Agent):
         """
         Clear the agent's message history.
         """
-        self.state.messages = []
+        self.messages = []
 
 
     async def update_context(self, **kwargs) -> None:
@@ -183,7 +183,7 @@ class ReactAgent(Agent):
         :return: String representation
         :rtype: str
         """
-        return f'Agent(state={self.state}, config={self.config}, num_messages={len(self.state.messages)})'
+        return f'Agent(state={self.state}, config={self.config}, num_messages={len(self.messages)})'
     
     
     def __str__(self) -> str:
@@ -193,7 +193,7 @@ class ReactAgent(Agent):
         :return: String representation
         :rtype: str
         """
-        return f'Agent(state={self.state}, config={self.config}, num_messages={len(self.state.messages)})'
+        return f'Agent(state={self.state}, config={self.config}, num_messages={len(self.messages)})'
 
 
     async def add_tool(
@@ -380,7 +380,7 @@ Rules:
             
             # Get recent context
             current_context = "\n".join(
-                [str(m) for m in self.state.messages[-5:]]
+                [str(m) for m in self.messages[-5:]]
             )
             logger.debug(f"Current context length: {len(current_context)}")
             

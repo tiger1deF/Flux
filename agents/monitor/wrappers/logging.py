@@ -48,7 +48,7 @@ def logging_agent_wrapper(func):
             raise ValueError("Input Message class is required for agent!")
             
         if input_message:
-            self.state.input_messages[start_time] = input_message
+            self.input_messages[start_time] = input_message
         else:
             raise ValueError("Input Message class is required for agent!")
                 
@@ -68,7 +68,7 @@ def logging_agent_wrapper(func):
             if not isinstance(result, Message):
                 raise ValueError("Output Message class is required for agent!")
             
-            for message in self.state.messages:
+            for message in self.messages:
                 logging_tasks.append(self.agent_log.log_message(message))
                     
             logging_tasks.append(self.agent_log.log_output(result))
@@ -78,7 +78,7 @@ def logging_agent_wrapper(func):
                 )
             )
 
-            self.state.output_messages[end_time] = result
+            self.output_messages[end_time] = result
             
             await asyncio.gather(*logging_tasks)
             
@@ -107,7 +107,7 @@ def logging_agent_wrapper(func):
                 date = end_time
             )
             
-            self.state.error_messages[end_time] = error_message
+            self.error_messages[end_time] = error_message
             return error_message
         
     return wrapper

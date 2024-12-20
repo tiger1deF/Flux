@@ -74,7 +74,7 @@ def langfuse_agent_wrapper(func):
             if not isinstance(result, Message):
                 raise ValueError("Output Message class is required for agent!")
                             
-            for message in self.state.messages:
+            for message in self.messages:
                 logging_tasks.append(self.agent_log.log_message(message))
             
             await self.agent_log.log_output(result)
@@ -85,7 +85,7 @@ def langfuse_agent_wrapper(func):
                 )
             )
 
-            self.state.output_messages[end_time] = result
+            self.output_messages[end_time] = result
             
             await asyncio.gather(*logging_tasks)
                         
@@ -111,7 +111,7 @@ def langfuse_agent_wrapper(func):
                 date = end_time
             )
             
-            self.state.error_messages[end_time] = error_message
+            self.error_messages[end_time] = error_message
                         
             return error_message
         

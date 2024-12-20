@@ -4,48 +4,27 @@ Language Models
 .. module:: llm
    :synopsis: Language model implementations and interfaces.
 
-Base LLM Interface
-----------------
-.. automodule:: llm.llm
+Overview
+--------
+The language models module provides base classes and utilities for working with
+LLMs, including parameter management, type checking, and thread-safe execution.
+
+Base LLM
+--------
+.. autoclass:: llm.LLM
    :members:
    :undoc-members:
    :show-inheritance:
    :special-members: __init__, __call__
+   :exclude-members: _build_call_implementation, _get_type_hints, _inspect_function, _async_lock
 
-LLM Models
----------
+Parameter Models
+--------------
 .. automodule:: llm.models
    :members:
    :undoc-members:
    :show-inheritance:
    :special-members: __init__
 
-Embeddings
----------
-
-.. module:: llm.embeddings
-   :synopsis: Embedding model implementations.
-
-Pulse Embeddings
-~~~~~~~~~~~~~~
-.. automodule:: llm.embeddings.pulse
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :special-members: __init__
-
-Gemini Embeddings
-~~~~~~~~~~~~~~~
-.. automodule:: llm.embeddings.gemini
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :special-members: __init__
-
-Local Embeddings
-~~~~~~~~~~~~~~
-.. automodule:: llm.embeddings.local
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :special-members: __init__ 
+See :doc:`embeddings` for embedding model implementations and :doc:`inference` for
+inference implementations. 

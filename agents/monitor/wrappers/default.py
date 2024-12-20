@@ -41,7 +41,7 @@ def default_agent_wrapper(func):
             input_message = args[0]
             
         if input_message:
-            self.state.input_messages[start_time] = input_message
+            self.input_messages[start_time] = input_message
         else:
             raise ValueError("Input Message class is required for agent!")
                 
@@ -59,7 +59,7 @@ def default_agent_wrapper(func):
             if not isinstance(result, Message):
                raise ValueError("Output Message class is required for agent!")
            
-            self.state.output_messages[end_time] = result
+            self.output_messages[end_time] = result
             self.agent_status = AgentStatus.COMPLETED
                 
             return result
@@ -76,7 +76,7 @@ def default_agent_wrapper(func):
                 agent_name = self.name,
                 date = end_time
             )
-            self.state.error_messages[end_time] = error_message
+            self.error_messages[end_time] = error_message
             
             return error_message
         

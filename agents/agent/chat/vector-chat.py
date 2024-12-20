@@ -1,3 +1,11 @@
+"""
+Vector chat agent implementation with embedding-based context management.
+
+This module provides a chat agent implementation that uses vector embeddings
+for context management and message history, supporting both synchronous and
+asynchronous operations.
+"""
+
 from typing import List, Optional, Union, Any, Dict
 from uuid import uuid4
 from datetime import datetime
@@ -38,6 +46,44 @@ from llm import (
 
 
 class VectorChatAgent(Agent):
+    """
+    Chat agent with vector-based context management.
+    
+    This agent uses vector embeddings to store and retrieve context,
+    supporting both sync and async operations with configurable logging.
+    
+    :ivar type: Type identifier for the agent
+    :type type: str
+    :ivar description: Optional description of the agent
+    :type description: Optional[str]
+    :ivar state: Agent state management
+    :type state: AgentState
+    :ivar config: Agent configuration
+    :type config: AgentConfig
+    :ivar chat_agents: List of connected chat agents
+    :type chat_agents: List[Agent]
+    :ivar llm: Language model for inference
+    :type llm: LLM
+    :ivar embed: Embedding function
+    :type embed: BaseEmbeddingFunction
+    :ivar vector_store: Vector storage for embeddings
+    :type vector_store: BaseVectorStore
+    :ivar logging: Whether logging is enabled
+    :type logging: bool
+    :ivar logger: Optional logger instance
+    :type logger: Optional[AgentLogger]
+    :ivar messages: Message history
+    :type messages: Dict[str, Message]
+    :ivar agent_log: Agent logging instance
+    :type agent_log: Optional[AgentLog]
+    :ivar runtime_logger: Runtime logger instance
+    :type runtime_logger: Optional[AgentLogger]
+    :ivar agent_status: Current agent status
+    :type agent_status: AgentStatus
+    :ivar session_id: Unique session identifier
+    :type session_id: str
+    """
+    
     type: str = Field(default = "chat")
     description: Optional[str] = None
     
@@ -126,7 +172,7 @@ class VectorChatAgent(Agent):
         if message_id is None:
             message_id = datetime.now()
         
-        self.state.messages[message_id] = message
+        self.messages[message_id] = message
         return message
 
 
@@ -146,11 +192,11 @@ class VectorChatAgent(Agent):
         :rtype: List[Message]
         """
         if limit:
-            return self.state.messages.items()[:limit]
+            return self.messages.items()[:limit]
         elif ids:
-            return [self.state.messages[id] for id in ids]
+            return [self.messages[id] for id in ids]
         else:
-            return self.state.messages.items()
+            return self.messages.items()
 
 
     @conditional_logging()
@@ -276,7 +322,7 @@ class VectorChatAgent(Agent):
         """
         Clear the agent's message history.
         """
-        self.state.messages = []
+        self.messages = []
 
 
     async def update_context(self, **kwargs) -> None:
@@ -295,7 +341,7 @@ class VectorChatAgent(Agent):
         :return: String representation
         :rtype: str
         """
-        return f'Agent(state={self.state}, config={self.config}, num_messages={len(self.state.messages)})'
+        return f'Agent(state={self.state}, config={self.config}, num_messages={len(self.messages)})'
     
     
     def __str__(self) -> str:
@@ -305,4 +351,4 @@ class VectorChatAgent(Agent):
         :return: String representation
         :rtype: str
         """
-        return f'Agent(state={self.state}, config={self.config}, num_messages={len(self.state.messages)})'
+        return f'Agent(state={self.state}, config={self.config}, num_messages={len(self.messages)})'

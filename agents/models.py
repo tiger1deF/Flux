@@ -94,14 +94,7 @@ class AgentState(BaseModel):
     :cvar _metadata_lock: Lock for thread-safe metadata access
     :type _metadata_lock: ClassVar[threading.RLock]
     
-    :ivar input_messages: Input message store
-    :type input_messages: Dict[str, Message]
-    :ivar output_messages: Output message store
-    :type output_messages: Dict[str, Message]
-    :ivar error_messages: Error message store
-    :type error_messages: Dict[str, Message]
-    :ivar messages: Complete message history
-    :type messages: List[Message]
+
     :ivar context: Context variable store
     :type context: Dict[str, Any]
     :ivar files: File store
@@ -114,12 +107,6 @@ class AgentState(BaseModel):
     :type session_id: str
     """
     _metadata_lock: ClassVar[threading.RLock] = threading.RLock()
-    
-    # Message stores
-    input_messages: Dict[str, Message] = Field(default_factory = dict)
-    output_messages: Dict[str, Message] = Field(default_factory = dict)
-    error_messages: Dict[str, Message] = Field(default_factory = dict)
-    messages: List[Message] = Field(default_factory = list)
     
     # Context stores
     context: Dict[str, Any] = Field(default_factory = dict)

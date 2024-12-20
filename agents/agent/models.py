@@ -30,7 +30,6 @@ from llm import (
     gemini_llm_async_inference,
 )
 
-
 from agents.monitor.logger import AgentLogger, AgentLogHandler
 from agents.monitor.agent_logs import AgentLog
 
@@ -88,7 +87,13 @@ class Agent(BaseModel):
     :type logging: bool
     :ivar logger: Agent logger instance
     :type logger: Optional[AgentLogger]
-    :ivar messages: Dictionary of messages
+    :ivar input_messages: Input message store
+    :type input_messages: Dict[str, Message]
+    :ivar output_messages: Output message store
+    :type output_messages: Dict[str, Message]
+    :ivar error_messages: Error message store
+    :type error_messages: Dict[str, Message]
+    :ivar messages: Complete message history
     :type messages: Dict[str, Message]
     :ivar agent_log: Log of agent operations
     :type agent_log: AgentLog
@@ -106,6 +111,12 @@ class Agent(BaseModel):
     state: AgentState = Field(default_factory = AgentState)
     config: AgentConfig = Field(default_factory = AgentConfig)
    
+    # Message stores
+    input_messages: Dict[str, Message] = Field(default_factory = dict)
+    output_messages: Dict[str, Message] = Field(default_factory = dict)
+    error_messages: Dict[str, Message] = Field(default_factory = dict)
+    messages: Dict[str, Message] = Field(default_factory = dict)
+    
     source_agents: List['Agent'] = Field(default_factory = list)
     target_agents: List['Agent'] = Field(default_factory = list)
 
@@ -113,8 +124,6 @@ class Agent(BaseModel):
         
     logging: bool = Field(default = True)
     logger: Optional[AgentLogger] = None
-    
-    messages: Dict[str, Message] = Field(default_factory = dict)
     
     agent_log: AgentLog = Field(default = None)
     runtime_logger: AgentLogger = Field(default = None)
@@ -154,7 +163,7 @@ class Agent(BaseModel):
             )
             self.runtime_logger.agent_handler.setFormatter(formatter)
             self.runtime_logger.addHandler(self.runtime_logger.agent_handler)
-            
+    
     
     @property
     def text(self) -> str:
@@ -185,7 +194,7 @@ class Agent(BaseModel):
         if message_id is None:
             message_id = datetime.now()
         
-        self.state.messages[message_id] = message
+        self.messages[message_id] = message
         return message
 
 
@@ -205,11 +214,11 @@ class Agent(BaseModel):
         :rtype: List[Message]
         """
         if limit:
-            return self.state.messages.items()[:limit]
+            return list(self.messages.items())[:limit]
         elif ids:
-            return [self.state.messages[id] for id in ids]
+            return [self.messages[id] for id in ids]
         else:
-            return self.state.messages.items()
+            return list(self.messages.items())
 
 
     @conditional_logging()
@@ -236,7 +245,7 @@ class Agent(BaseModel):
             prompt += self.config.task_prompt
         
         if self.state.context:
-            prompt += str(self.state.context)
+            prompt += self.state.context
         
         if input_message:
             prompt += input_message.content
@@ -271,8 +280,8 @@ class Agent(BaseModel):
             asyncio.set_event_loop(loop)
             return loop.run_until_complete(
                 self.send_message(
-                    input_message=input_message,
-                    state=state
+                    input_message = input_message,
+                    state = state
                 )
             )
         finally:
@@ -335,7 +344,7 @@ class Agent(BaseModel):
         """
         Clear the agent's message history.
         """
-        self.state.messages = []
+        self.messages = []
 
 
     async def update_context(self, **kwargs) -> None:
@@ -354,7 +363,7 @@ class Agent(BaseModel):
         :return: String representation
         :rtype: str
         """
-        return f'Agent(state={self.state}, config={self.config}, num_messages={len(self.state.messages)})'
+        return f'Agent(state={self.state}, config={self.config}, num_messages={len(self.messages)})'
     
     
     def __str__(self) -> str:
@@ -364,4 +373,4 @@ class Agent(BaseModel):
         :return: String representation
         :rtype: str
         """
-        return f'Agent(state={self.state}, config={self.config}, num_messages={len(self.state.messages)})'
+        return f'Agent(state={self.state}, config={self.config}, num_messages={len(self.messages)})'

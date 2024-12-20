@@ -1,3 +1,10 @@
+"""
+Gemini embedding model implementation.
+
+This module provides functions for generating embeddings using Google's Gemini API,
+with thread-safe initialization and caching of the client.
+"""
+
 from typing import List
 import os
 import threading

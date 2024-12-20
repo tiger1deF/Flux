@@ -117,4 +117,5 @@ def test_base_agent():
         print(response)
      
     asyncio.run(test_agent())
-    
+    print(agent.input_messages())
+    print(agent.output_messages())

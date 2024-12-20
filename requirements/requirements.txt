@@ -1,0 +1,34 @@
+# Storage + serialization
+msgpack
+orjson>=3.9.10
+zstandard
+pyarrow
+pandas
+numpy
+
+#LLM + vector
+google-generativeai
+hnswlib
+
+# visualization
+plotly
+
+# Async operations
+aiofiles
+aiohttp
+
+# VCS
+diff-match-patch 
+patience
+
+
+# OPTIONAL - for now
+plotly
+sentence-transformers[torch]>=2.5.0 
+
+# TODO - remove
+langfuse
+
+# Added from the code block
+torch
+transformers

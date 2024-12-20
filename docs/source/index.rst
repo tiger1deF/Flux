@@ -2,6 +2,9 @@
 Welcome to Flux Documentation
 ################################
 
+.. warning::
+   This is an alpha version (0.1) released December 2023. The API is still under heavy development and may change significantly. Use with caution in production environments.
+
 .. image:: _static/flux_logo.png
    :alt: Flux Logo
    :align: center

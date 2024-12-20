@@ -1,5 +1,5 @@
 Utilities
-========
+=========
 
 .. toctree::
    :maxdepth: 2
@@ -7,6 +7,13 @@ Utilities
    serialization
    summarization
    shared/tokenizer
+
+Core Utilities
+------------
+.. automodule:: utils
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
 Serialization
 ------------
@@ -18,6 +25,13 @@ Serialization
 Summarization
 ------------
 .. automodule:: utils.summarization
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Tokenizer
+---------
+.. automodule:: utils.shared.tokenizer
    :members:
    :undoc-members:
    :show-inheritance: 

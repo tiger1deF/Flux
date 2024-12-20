@@ -1,0 +1,39 @@
+# Sensitive data
+deployment/
+deployment/*
+/deployment/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Virtual environments
+venv/
+env/
+.env/
+.venv/
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Other common files to ignore
+.DS_Store
+*.log
+
+# Docs build files
+docs/build/
+*.pyc
+
+# PyPI credentials
+.pypirc
+*/.pypirc
+~/.pypirc

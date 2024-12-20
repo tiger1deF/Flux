@@ -1,0 +1,948 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>agents.models &mdash; Flux 0.1 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=2709fde1"></script>
+      <script src="../../_static/doctools.js?v=9a2dae69"></script>
+      <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            Flux
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Core Components</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../agents/index.html">Agents</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../llm/index.html">Language Models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../utils/index.html">Utilities</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tests/index.html">Tests</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">Flux</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">agents.models</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for agents.models</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Core agent models and state management.</span>
+
+<span class="sd">This module provides the base models for agent configuration, state management,</span>
+<span class="sd">and file handling with support for both synchronous and asynchronous operations.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">List</span><span class="p">,</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">Union</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">ClassVar</span>
+<span class="kn">import</span> <span class="nn">tempfile</span>
+<span class="kn">from</span> <span class="nn">enum</span> <span class="kn">import</span> <span class="n">Enum</span>
+<span class="kn">from</span> <span class="nn">pathlib</span> <span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">from</span> <span class="nn">pydantic</span> <span class="kn">import</span> <span class="n">BaseModel</span><span class="p">,</span> <span class="n">Field</span>
+<span class="kn">import</span> <span class="nn">json</span>
+<span class="kn">import</span> <span class="nn">aiofiles</span>
+<span class="kn">import</span> <span class="nn">asyncio</span>
+<span class="kn">from</span> <span class="nn">contextlib</span> <span class="kn">import</span> <span class="n">asynccontextmanager</span>
+<span class="kn">import</span> <span class="nn">datetime</span>
+<span class="kn">from</span> <span class="nn">difflib</span> <span class="kn">import</span> <span class="n">SequenceMatcher</span><span class="p">,</span> <span class="n">unified_diff</span>
+<span class="kn">import</span> <span class="nn">pandas</span> <span class="k">as</span> <span class="nn">pd</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">re</span>
+<span class="kn">import</span> <span class="nn">threading</span>
+<span class="kn">from</span> <span class="nn">concurrent.futures</span> <span class="kn">import</span> <span class="n">ThreadPoolExecutor</span>
+<span class="kn">from</span> <span class="nn">functools</span> <span class="kn">import</span> <span class="n">partial</span><span class="p">,</span> <span class="n">cached_property</span>
+<span class="kn">import</span> <span class="nn">multiprocessing</span>
+<span class="kn">import</span> <span class="nn">contextlib</span>
+<span class="kn">from</span> <span class="nn">uuid</span> <span class="kn">import</span> <span class="n">uuid4</span>
+
+<span class="kn">from</span> <span class="nn">agents.messages.models</span> <span class="kn">import</span> <span class="n">Message</span><span class="p">,</span> <span class="n">File</span>
+
+
+<div class="viewcode-block" id="AgentStatus">
+<a class="viewcode-back" href="../../agents/models.html#agents.models.AgentStatus">[docs]</a>
+<span class="k">class</span> <span class="nc">AgentStatus</span><span class="p">(</span><span class="n">Enum</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Enumeration of possible agent execution states.</span>
+<span class="sd">    </span>
+<span class="sd">    :cvar IDLE: Agent is waiting for work</span>
+<span class="sd">    :cvar RUNNING: Agent is currently executing</span>
+<span class="sd">    :cvar COMPLETED: Agent has finished successfully</span>
+<span class="sd">    :cvar FAILED: Agent encountered an error</span>
+<span class="sd">    :cvar CANCELLED: Agent execution was cancelled</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">IDLE</span> <span class="o">=</span> <span class="s2">&quot;idle&quot;</span>
+    <span class="n">RUNNING</span> <span class="o">=</span> <span class="s2">&quot;running&quot;</span>
+    <span class="n">COMPLETED</span> <span class="o">=</span> <span class="s2">&quot;completed&quot;</span>
+    <span class="n">FAILED</span> <span class="o">=</span> <span class="s2">&quot;failed&quot;</span>
+    <span class="n">CANCELLED</span> <span class="o">=</span> <span class="s2">&quot;cancelled&quot;</span></div>
+
+
+
+<div class="viewcode-block" id="Logging">
+<a class="viewcode-back" href="../../agents/models.html#agents.models.Logging">[docs]</a>
+<span class="k">class</span> <span class="nc">Logging</span><span class="p">(</span><span class="n">Enum</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Enumeration of logging modes for agents.</span>
+<span class="sd">    </span>
+<span class="sd">    :cvar LANGFUSE: Use Langfuse for logging</span>
+<span class="sd">    :cvar ENABLED: Use basic logging</span>
+<span class="sd">    :cvar DISABLED: Disable logging</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">LANGFUSE</span> <span class="o">=</span> <span class="s2">&quot;langfuse&quot;</span>
+    <span class="n">ENABLED</span> <span class="o">=</span> <span class="s2">&quot;enabled&quot;</span>
+    <span class="n">DISABLED</span> <span class="o">=</span> <span class="s2">&quot;disabled&quot;</span></div>
+
+
+
+<div class="viewcode-block" id="AgentConfig">
+<a class="viewcode-back" href="../../agents/models.html#agents.models.AgentConfig">[docs]</a>
+<span class="k">class</span> <span class="nc">AgentConfig</span><span class="p">(</span><span class="n">BaseModel</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Configuration model for agents.</span>
+<span class="sd">    </span>
+<span class="sd">    :ivar task_prompt: Main task prompt for the agent</span>
+<span class="sd">    :type task_prompt: Optional[str]</span>
+<span class="sd">    :ivar prompts: Dictionary of named prompts</span>
+<span class="sd">    :type prompts: Dict[str, str]</span>
+<span class="sd">    :ivar attributes: Additional configuration attributes</span>
+<span class="sd">    :type attributes: Dict[str, Any]</span>
+<span class="sd">    :ivar description: Agent description</span>
+<span class="sd">    :type description: Optional[str]</span>
+<span class="sd">    :ivar logging: Logging mode</span>
+<span class="sd">    :type logging: Logging</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">task_prompt</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">prompts</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">default_factory</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">)</span>
+    <span class="n">attributes</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">default_factory</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">)</span>
+    <span class="n">description</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">logging</span><span class="p">:</span> <span class="n">Logging</span> <span class="o">=</span> <span class="n">Logging</span><span class="o">.</span><span class="n">LANGFUSE</span>
+    
+    <span class="k">def</span> <span class="fm">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;AgentConfig(system_prompt=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">system_prompt</span><span class="si">}</span><span class="s2">, prompts=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">prompts</span><span class="si">}</span><span class="s2">, attributes=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">attributes</span><span class="si">}</span><span class="s2">)&quot;</span></div>
+
+
+    
+<div class="viewcode-block" id="AgentState">
+<a class="viewcode-back" href="../../agents/models.html#agents.models.AgentState">[docs]</a>
+<span class="k">class</span> <span class="nc">AgentState</span><span class="p">(</span><span class="n">BaseModel</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    State management model for agents.</span>
+<span class="sd">    </span>
+<span class="sd">    Handles message history, context storage, file management, and metadata</span>
+<span class="sd">    with thread-safe operations.</span>
+<span class="sd">    </span>
+<span class="sd">    :cvar _metadata_lock: Lock for thread-safe metadata access</span>
+<span class="sd">    :type _metadata_lock: ClassVar[threading.RLock]</span>
+<span class="sd">    </span>
+
+<span class="sd">    :ivar context: Context variable store</span>
+<span class="sd">    :type context: Dict[str, Any]</span>
+<span class="sd">    :ivar files: File store</span>
+<span class="sd">    :type files: Dict[str, File]</span>
+<span class="sd">    :ivar metadata: Metadata store</span>
+<span class="sd">    :type metadata: Dict[str, Any]</span>
+<span class="sd">    :ivar temp_dir: Temporary directory path</span>
+<span class="sd">    :type temp_dir: Optional[str]</span>
+<span class="sd">    :ivar session_id: Unique session identifier</span>
+<span class="sd">    :type session_id: str</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">_metadata_lock</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="n">threading</span><span class="o">.</span><span class="n">RLock</span><span class="p">]</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">RLock</span><span class="p">()</span>
+    
+    <span class="c1"># Context stores</span>
+    <span class="n">context</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">default_factory</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">)</span>
+    <span class="n">files</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">File</span><span class="p">]</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">default_factory</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">)</span>
+    <span class="n">metadata</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">default_factory</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">)</span>
+    <span class="n">temp_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">default</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">exclude</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span>
+    <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">default</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">uuid4</span><span class="p">()),</span> <span class="n">exclude</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span>
+    
+    <span class="nd">@cached_property</span> 
+    <span class="k">def</span> <span class="nf">_executor</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ThreadPoolExecutor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Get or create thread pool executor for metadata operations.</span>
+<span class="sd">        </span>
+<span class="sd">        :return: Thread pool executor</span>
+<span class="sd">        :rtype: ThreadPoolExecutor</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">worker_threads</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">threading</span><span class="o">.</span><span class="n">enumerate</span><span class="p">())</span>
+            <span class="n">thread_count</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="nb">min</span><span class="p">(</span><span class="n">worker_threads</span><span class="p">,</span> <span class="n">multiprocessing</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">()))</span>
+        <span class="k">except</span><span class="p">:</span>
+            <span class="n">thread_count</span> <span class="o">=</span> <span class="n">multiprocessing</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">()</span>
+            
+        <span class="k">return</span> <span class="n">ThreadPoolExecutor</span><span class="p">(</span>
+            <span class="n">max_workers</span><span class="o">=</span><span class="n">thread_count</span><span class="p">,</span>
+            <span class="n">thread_name_prefix</span><span class="o">=</span><span class="s1">&#39;agent_metadata_&#39;</span>
+        <span class="p">)</span>
+    
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">_run_in_executor</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">func</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Run a function in the thread pool executor.</span>
+<span class="sd">        </span>
+<span class="sd">        :param func: Function to execute</span>
+<span class="sd">        :type func: Callable</span>
+<span class="sd">        :param args: Arguments for the function</span>
+<span class="sd">        :return: Function result</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_running_loop</span><span class="p">()</span>
+        <span class="k">return</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_executor</span><span class="p">,</span>
+            <span class="n">partial</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">)</span>
+        <span class="p">)</span>
+    
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">temp_directory</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Get or create temporary directory for file operations.</span>
+<span class="sd">        </span>
+<span class="sd">        :return: Path to temporary directory</span>
+<span class="sd">        :rtype: Path</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">temp_dir</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">temp_dir</span> <span class="o">=</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">mkdtemp</span><span class="p">(</span><span class="n">prefix</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;agent_workspace_</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">metadata</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">_&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">Path</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">temp_dir</span><span class="p">)</span>
+    
+<div class="viewcode-block" id="AgentState.cleanup">
+<a class="viewcode-back" href="../../agents/models.html#agents.models.AgentState.cleanup">[docs]</a>
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">cleanup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Clean up temporary directory and resources.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">temp_dir</span> <span class="ow">and</span> <span class="n">Path</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">temp_dir</span><span class="p">)</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">to_thread</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_cleanup_sync</span><span class="p">)</span></div>
+
+    
+    <span class="k">def</span> <span class="nf">_cleanup_sync</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Synchronous cleanup of temporary directory.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="kn">import</span> <span class="nn">shutil</span>
+        <span class="n">shutil</span><span class="o">.</span><span class="n">rmtree</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">temp_dir</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">temp_dir</span> <span class="o">=</span> <span class="kc">None</span>
+    
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">__adel__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Async cleanup on deletion.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">cleanup</span><span class="p">()</span>
+
+
+<div class="viewcode-block" id="AgentState.create_file">
+<a class="viewcode-back" href="../../agents/models.html#agents.models.AgentState.create_file">[docs]</a>
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">create_file</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> 
+        <span class="n">filename</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> 
+        <span class="n">path</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Path</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">content</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="n">annotations</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="p">{},</span>
+        <span class="n">description</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">File</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Create a new file in the agent&#39;s workspace.</span>
+<span class="sd">        </span>
+<span class="sd">        :param filename: Name of the file to create</span>
+<span class="sd">        :type filename: str</span>
+<span class="sd">        :param path: Optional custom path, defaults to temp directory</span>
+<span class="sd">        :type path: Union[str, Path], optional</span>
+<span class="sd">        :param content: Initial file content</span>
+<span class="sd">        :type content: str, optional</span>
+<span class="sd">        :param annotations: Metadata annotations for the file</span>
+<span class="sd">        :type annotations: Dict[str, Any], optional</span>
+<span class="sd">        :param description: File description</span>
+<span class="sd">        :type description: str, optional</span>
+<span class="sd">        :return: Created file object</span>
+<span class="sd">        :rtype: File</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">path</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">file_path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">temp_directory</span> <span class="o">/</span> <span class="n">filename</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">file_path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span> <span class="o">/</span> <span class="n">filename</span>
+        
+        <span class="k">async</span> <span class="k">with</span> <span class="n">aiofiles</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">file_path</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="k">await</span> <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">content</span><span class="p">)</span>
+        
+        <span class="n">file</span> <span class="o">=</span> <span class="n">File</span><span class="p">(</span>
+            <span class="n">content</span> <span class="o">=</span> <span class="n">content</span><span class="p">,</span>
+            <span class="n">path</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">file_path</span><span class="p">),</span>
+            <span class="n">description</span> <span class="o">=</span> <span class="n">description</span><span class="p">,</span>
+            <span class="n">annotations</span> <span class="o">=</span> <span class="n">annotations</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">files</span><span class="p">[</span><span class="n">filename</span><span class="p">]</span> <span class="o">=</span> <span class="n">file</span>
+        
+        <span class="k">return</span> <span class="n">file</span></div>
+
+    
+    
+<div class="viewcode-block" id="AgentState.read_file">
+<a class="viewcode-back" href="../../agents/models.html#agents.models.AgentState.read_file">[docs]</a>
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">read_file</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">filename</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Read contents of a file from the agent&#39;s workspace.</span>
+<span class="sd">        </span>
+<span class="sd">        :param filename: Name of the file to read</span>
+<span class="sd">        :type filename: str</span>
+<span class="sd">        :return: File contents</span>
+<span class="sd">        :rtype: str</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">file_path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">temp_directory</span> <span class="o">/</span> <span class="n">filename</span>
+        <span class="k">async</span> <span class="k">with</span> <span class="n">aiofiles</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">file_path</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="k">return</span> <span class="k">await</span> <span class="n">f</span><span class="o">.</span><span class="n">read</span><span class="p">()</span></div>
+
+    
+    
+    <span class="c1">######################</span>
+    <span class="c1"># Context Management # </span>
+    <span class="c1">######################</span>
+    
+<div class="viewcode-block" id="AgentState.obtain_context">
+<a class="viewcode-back" href="../../agents/models.html#agents.models.AgentState.obtain_context">[docs]</a>
+    <span class="k">def</span> <span class="nf">obtain_context</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Any</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Get value(s) from the context store.</span>
+<span class="sd">        </span>
+<span class="sd">        :param key: Optional key to retrieve specific value</span>
+<span class="sd">        :type key: str, optional</span>
+<span class="sd">        :return: Context value or formatted string of all context</span>
+<span class="sd">        :rtype: Any</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">key</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">context_str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+            <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">context</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="n">context_str</span> <span class="o">+=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">value</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="k">return</span> <span class="n">context_str</span>
+        
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">context</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span></div>
+
+    
+    
+<div class="viewcode-block" id="AgentState.update_context">
+<a class="viewcode-back" href="../../agents/models.html#agents.models.AgentState.update_context">[docs]</a>
+    <span class="k">def</span> <span class="nf">update_context</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Update context store with new key-value pairs.</span>
+<span class="sd">        </span>
+<span class="sd">        :param kwargs: Key-value pairs to update</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">context</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+
+    
+<div class="viewcode-block" id="AgentState.flush_context">
+<a class="viewcode-back" href="../../agents/models.html#agents.models.AgentState.flush_context">[docs]</a>
+    <span class="k">def</span> <span class="nf">flush_context</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Remove items from context store.</span>
+<span class="sd">        </span>
+<span class="sd">        :param kwargs: Optional keys to remove, if none provided clears all context</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">kwargs</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">context</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+            <span class="k">return</span>
+        
+        <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">keys</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">key</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">context</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">context</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">key</span><span class="p">)</span></div>
+
+    
+    
+    <span class="c1">###################</span>
+    <span class="c1"># File Management # </span>
+    <span class="c1">###################</span>
+    
+<div class="viewcode-block" id="AgentState.write_file">
+<a class="viewcode-back" href="../../agents/models.html#agents.models.AgentState.write_file">[docs]</a>
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">write_file</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> 
+        <span class="n">filename</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> 
+        <span class="n">content</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">annotations</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="p">{},</span>
+        <span class="n">description</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">File</span><span class="p">:</span>  
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Write content to a file in the agent&#39;s workspace.</span>
+<span class="sd">        </span>
+<span class="sd">        :param filename: Name of the file to write</span>
+<span class="sd">        :type filename: str</span>
+<span class="sd">        :param content: Content to write</span>
+<span class="sd">        :type content: str</span>
+<span class="sd">        :param annotations: Metadata annotations for the file</span>
+<span class="sd">        :type annotations: Dict[str, Any], optional</span>
+<span class="sd">        :param description: File description</span>
+<span class="sd">        :type description: str, optional</span>
+<span class="sd">        :return: Created/updated file object</span>
+<span class="sd">        :rtype: File</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_file</span><span class="p">(</span>
+            <span class="n">filename</span><span class="p">,</span> 
+            <span class="n">content</span><span class="p">,</span> 
+            <span class="n">annotations</span><span class="p">,</span> 
+            <span class="n">description</span>
+        <span class="p">)</span></div>
+
+    
+    
+<div class="viewcode-block" id="AgentState.append_file">
+<a class="viewcode-back" href="../../agents/models.html#agents.models.AgentState.append_file">[docs]</a>
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">append_file</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> 
+        <span class="n">filename</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> 
+        <span class="n">content</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">annotations</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="p">{},</span>
+        <span class="n">description</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">File</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Append content to an existing file.</span>
+<span class="sd">        </span>
+<span class="sd">        :param filename: Name of the file to append to</span>
+<span class="sd">        :type filename: str</span>
+<span class="sd">        :param content: Content to append</span>
+<span class="sd">        :type content: str</span>
+<span class="sd">        :param annotations: Additional metadata annotations</span>
+<span class="sd">        :type annotations: Dict[str, Any], optional</span>
+<span class="sd">        :param description: Additional description</span>
+<span class="sd">        :type description: str, optional</span>
+<span class="sd">        :return: Updated file object</span>
+<span class="sd">        :rtype: File</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">file_path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">temp_directory</span> <span class="o">/</span> <span class="n">filename</span>
+        <span class="k">async</span> <span class="k">with</span> <span class="n">aiofiles</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">file_path</span><span class="p">,</span> <span class="s1">&#39;a&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="k">await</span> <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">content</span><span class="p">)</span>
+        
+        <span class="n">file</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">files</span><span class="p">[</span><span class="n">filename</span><span class="p">]</span>
+        <span class="n">file</span><span class="o">.</span><span class="n">content</span> <span class="o">=</span> <span class="n">file</span><span class="o">.</span><span class="n">content</span> <span class="o">+</span> <span class="n">content</span>
+        <span class="n">file</span><span class="o">.</span><span class="n">annotations</span> <span class="o">=</span> <span class="n">file</span><span class="o">.</span><span class="n">annotations</span> <span class="o">|</span> <span class="n">annotations</span>
+        <span class="n">file</span><span class="o">.</span><span class="n">description</span> <span class="o">=</span> <span class="n">file</span><span class="o">.</span><span class="n">description</span> <span class="o">+</span> <span class="n">description</span>
+        
+        <span class="bp">self</span><span class="o">.</span><span class="n">files</span><span class="p">[</span><span class="n">filename</span><span class="p">]</span> <span class="o">=</span> <span class="n">file</span>
+        
+        <span class="k">return</span> <span class="n">file</span></div>
+
+    
+    
+<div class="viewcode-block" id="AgentState.edit_file">
+<a class="viewcode-back" href="../../agents/models.html#agents.models.AgentState.edit_file">[docs]</a>
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">edit_file</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">filename</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">new_content</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">edit_description</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="n">annotations</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">File</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Edit an existing file with new content and track changes.</span>
+<span class="sd">        </span>
+<span class="sd">        :param filename: Name of the file to edit</span>
+<span class="sd">        :type filename: str</span>
+<span class="sd">        :param new_content: New content to write</span>
+<span class="sd">        :type new_content: str</span>
+<span class="sd">        :param edit_description: Description of the edit</span>
+<span class="sd">        :type edit_description: str, optional</span>
+<span class="sd">        :param annotations: Additional metadata annotations</span>
+<span class="sd">        :type annotations: Dict[str, Any], optional</span>
+<span class="sd">        :return: Updated file object with edit history</span>
+<span class="sd">        :rtype: File</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">filename</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">files</span><span class="p">:</span>
+            <span class="k">return</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_file</span><span class="p">(</span>
+                <span class="n">filename</span><span class="p">,</span>
+                <span class="n">new_content</span><span class="p">,</span>
+                <span class="n">annotations</span><span class="p">,</span>
+                <span class="n">edit_description</span>
+            <span class="p">)</span>
+
+        <span class="n">file</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">files</span><span class="p">[</span><span class="n">filename</span><span class="p">]</span>
+        <span class="n">old_content</span> <span class="o">=</span> <span class="n">file</span><span class="o">.</span><span class="n">content</span>
+        <span class="n">differ</span> <span class="o">=</span> <span class="n">SequenceMatcher</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">old_content</span><span class="p">,</span> <span class="n">new_content</span><span class="p">)</span>
+        <span class="n">changes</span> <span class="o">=</span> <span class="p">[]</span>
+        
+        <span class="k">for</span> <span class="n">tag</span><span class="p">,</span> <span class="n">i1</span><span class="p">,</span> <span class="n">i2</span><span class="p">,</span> <span class="n">j1</span><span class="p">,</span> <span class="n">j2</span> <span class="ow">in</span> <span class="n">differ</span><span class="o">.</span><span class="n">get_opcodes</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">tag</span> <span class="o">!=</span> <span class="s1">&#39;equal&#39;</span><span class="p">:</span>
+                <span class="n">changes</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
+                    <span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="n">tag</span><span class="p">,</span>
+                    <span class="s1">&#39;old_start&#39;</span><span class="p">:</span> <span class="n">i1</span><span class="p">,</span>
+                    <span class="s1">&#39;old_end&#39;</span><span class="p">:</span> <span class="n">i2</span><span class="p">,</span>
+                    <span class="s1">&#39;new_start&#39;</span><span class="p">:</span> <span class="n">j1</span><span class="p">,</span> 
+                    <span class="s1">&#39;new_end&#39;</span><span class="p">:</span> <span class="n">j2</span><span class="p">,</span>
+                    <span class="s1">&#39;old_text&#39;</span><span class="p">:</span> <span class="n">old_content</span><span class="p">[</span><span class="n">i1</span><span class="p">:</span><span class="n">i2</span><span class="p">],</span>
+                    <span class="s1">&#39;new_text&#39;</span><span class="p">:</span> <span class="n">new_content</span><span class="p">[</span><span class="n">j1</span><span class="p">:</span><span class="n">j2</span><span class="p">]</span>
+                <span class="p">})</span>
+
+        <span class="n">diff_text</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">unified_diff</span><span class="p">(</span>
+            <span class="n">old_content</span><span class="o">.</span><span class="n">splitlines</span><span class="p">(</span><span class="kc">True</span><span class="p">),</span>
+            <span class="n">new_content</span><span class="o">.</span><span class="n">splitlines</span><span class="p">(</span><span class="kc">True</span><span class="p">),</span>
+            <span class="n">fromfile</span> <span class="o">=</span> <span class="s1">&#39;previous&#39;</span><span class="p">,</span>
+            <span class="n">tofile</span> <span class="o">=</span> <span class="s1">&#39;new&#39;</span>
+        <span class="p">))</span>
+
+        <span class="n">file_path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">temp_directory</span> <span class="o">/</span> <span class="n">filename</span>
+        <span class="k">async</span> <span class="k">with</span> <span class="n">aiofiles</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">file_path</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="k">await</span> <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">new_content</span><span class="p">)</span>  
+        <span class="n">file</span><span class="o">.</span><span class="n">content</span> <span class="o">=</span> <span class="n">new_content</span>
+        
+        <span class="k">if</span> <span class="n">edit_description</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">file</span><span class="o">.</span><span class="n">description</span><span class="p">:</span>
+                <span class="n">file</span><span class="o">.</span><span class="n">description</span> <span class="o">+=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="si">{</span><span class="n">edit_description</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">file</span><span class="o">.</span><span class="n">description</span> <span class="o">=</span> <span class="n">edit_description</span>
+
+        <span class="n">change_meta</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;changes&quot;</span><span class="p">:</span> <span class="n">changes</span><span class="p">,</span>
+            <span class="s2">&quot;diff&quot;</span><span class="p">:</span> <span class="n">diff_text</span><span class="p">,</span>
+            <span class="s2">&quot;last_edited&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">())</span>
+        <span class="p">}</span>
+        
+        <span class="n">file</span><span class="o">.</span><span class="n">annotations</span> <span class="o">=</span> <span class="n">file</span><span class="o">.</span><span class="n">annotations</span> <span class="o">|</span> <span class="n">annotations</span> <span class="o">|</span> <span class="p">{</span><span class="s2">&quot;edit_history&quot;</span><span class="p">:</span> <span class="n">change_meta</span><span class="p">}</span>
+        <span class="k">if</span> <span class="s2">&quot;edit_count&quot;</span> <span class="ow">in</span> <span class="n">file</span><span class="o">.</span><span class="n">annotations</span><span class="p">:</span>
+            <span class="n">file</span><span class="o">.</span><span class="n">annotations</span><span class="p">[</span><span class="s2">&quot;edit_count&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">file</span><span class="o">.</span><span class="n">annotations</span><span class="p">[</span><span class="s2">&quot;edit_count&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">1</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">files</span><span class="p">[</span><span class="n">filename</span><span class="p">]</span> <span class="o">=</span> <span class="n">file</span>
+        
+        <span class="k">return</span> <span class="n">file</span></div>
+
+    
+    
+<div class="viewcode-block" id="AgentState.delete_file">
+<a class="viewcode-back" href="../../agents/models.html#agents.models.AgentState.delete_file">[docs]</a>
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">delete_file</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">filename</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Delete a file from the agent&#39;s workspace.</span>
+<span class="sd">        </span>
+<span class="sd">        :param filename: Name of the file to delete</span>
+<span class="sd">        :type filename: str</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">file_path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">temp_directory</span> <span class="o">/</span> <span class="n">filename</span>
+        <span class="k">if</span> <span class="n">file_path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">to_thread</span><span class="p">(</span><span class="n">file_path</span><span class="o">.</span><span class="n">unlink</span><span class="p">)</span>
+            <span class="k">del</span> <span class="bp">self</span><span class="o">.</span><span class="n">files</span><span class="p">[</span><span class="n">filename</span><span class="p">]</span></div>
+
+    
+    
+<div class="viewcode-block" id="AgentState.list_files">
+<a class="viewcode-back" href="../../agents/models.html#agents.models.AgentState.list_files">[docs]</a>
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">list_files</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pattern</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;*&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">Path</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        List files in the agent&#39;s workspace matching a pattern.</span>
+<span class="sd">        </span>
+<span class="sd">        :param pattern: Glob pattern for matching files</span>
+<span class="sd">        :type pattern: str</span>
+<span class="sd">        :return: List of matching file paths</span>
+<span class="sd">        :rtype: List[Path]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">temp_directory</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="n">pattern</span><span class="p">))</span></div>
+
+    
+    
+<div class="viewcode-block" id="AgentState.temp_file">
+<a class="viewcode-back" href="../../agents/models.html#agents.models.AgentState.temp_file">[docs]</a>
+    <span class="nd">@asynccontextmanager</span>
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">temp_file</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">suffix</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">prefix</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Create a temporary file in the agent&#39;s workspace.</span>
+<span class="sd">        </span>
+<span class="sd">        :param suffix: Optional suffix for the filename</span>
+<span class="sd">        :type suffix: str, optional</span>
+<span class="sd">        :param prefix: Optional prefix for the filename</span>
+<span class="sd">        :type prefix: str, optional</span>
+<span class="sd">        :yield: Path to the temporary file</span>
+<span class="sd">        :rtype: Path</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">temp_file</span> <span class="o">=</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">NamedTemporaryFile</span><span class="p">(</span>
+            <span class="nb">dir</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">temp_directory</span><span class="p">,</span>
+            <span class="n">suffix</span> <span class="o">=</span> <span class="n">suffix</span><span class="p">,</span>
+            <span class="n">prefix</span> <span class="o">=</span> <span class="n">prefix</span><span class="p">,</span>
+            <span class="n">delete</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">yield</span> <span class="n">Path</span><span class="p">(</span><span class="n">temp_file</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">delete_file</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="n">temp_file</span><span class="o">.</span><span class="n">name</span><span class="p">)</span><span class="o">.</span><span class="n">name</span><span class="p">)</span></div>
+
+    
+    
+<div class="viewcode-block" id="AgentState.save_json">
+<a class="viewcode-back" href="../../agents/models.html#agents.models.AgentState.save_json">[docs]</a>
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">save_json</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">filename</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">data</span><span class="p">:</span> <span class="n">Any</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Save data as JSON to a file.</span>
+<span class="sd">        </span>
+<span class="sd">        :param filename: Name of the file to save</span>
+<span class="sd">        :type filename: str</span>
+<span class="sd">        :param data: Data to serialize as JSON</span>
+<span class="sd">        :type data: Any</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">async</span> <span class="k">with</span> <span class="n">aiofiles</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">temp_directory</span> <span class="o">/</span> <span class="n">filename</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="k">await</span> <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">indent</span> <span class="o">=</span> <span class="mi">2</span><span class="p">))</span></div>
+
+    
+    
+    <span class="c1">######################</span>
+    <span class="c1"># Metadata Management # </span>
+    <span class="c1">#######################</span>
+    
+<div class="viewcode-block" id="AgentState.access_metadata">
+<a class="viewcode-back" href="../../agents/models.html#agents.models.AgentState.access_metadata">[docs]</a>
+    <span class="nd">@contextlib</span><span class="o">.</span><span class="n">asynccontextmanager</span>
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">access_metadata</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Any</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Thread-safe access to metadata store.</span>
+<span class="sd">        </span>
+<span class="sd">        :param key: Optional key to access specific metadata</span>
+<span class="sd">        :type key: str, optional</span>
+<span class="sd">        :yield: Metadata dictionary or specific value</span>
+<span class="sd">        :rtype: Any</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">async</span> <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_async_lock</span><span class="p">():</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">key</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="k">yield</span> <span class="bp">self</span><span class="o">.</span><span class="n">metadata</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">yield</span> <span class="bp">self</span><span class="o">.</span><span class="n">metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+            <span class="k">finally</span><span class="p">:</span>
+                <span class="k">pass</span>  </div>
+
+
+
+<div class="viewcode-block" id="AgentState.get_metadata">
+<a class="viewcode-back" href="../../agents/models.html#agents.models.AgentState.get_metadata">[docs]</a>
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">get_metadata</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Any</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Get metadata value(s).</span>
+<span class="sd">        </span>
+<span class="sd">        :param key: Optional key to get specific metadata</span>
+<span class="sd">        :type key: str, optional</span>
+<span class="sd">        :return: Metadata value or entire metadata dict</span>
+<span class="sd">        :rtype: Any</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">async</span> <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">access_metadata</span><span class="p">(</span><span class="n">key</span><span class="p">)</span> <span class="k">as</span> <span class="n">metadata</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">metadata</span></div>
+
+
+
+<div class="viewcode-block" id="AgentState.update_metadata">
+<a class="viewcode-back" href="../../agents/models.html#agents.models.AgentState.update_metadata">[docs]</a>
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">update_metadata</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> 
+        <span class="n">metadata</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">],</span> 
+        <span class="n">merge</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Update metadata with optional merging of values.</span>
+<span class="sd">        </span>
+<span class="sd">        :param metadata: New metadata to update</span>
+<span class="sd">        :type metadata: Dict[str, Any]</span>
+<span class="sd">        :param merge: Whether to merge with existing values</span>
+<span class="sd">        :type merge: bool, optional</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">async</span> <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">access_metadata</span><span class="p">()</span> <span class="k">as</span> <span class="n">current_metadata</span><span class="p">:</span>
+            <span class="n">updates</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="n">direct_updates</span> <span class="o">=</span> <span class="p">{}</span>
+            
+            <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">metadata</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="k">if</span> <span class="n">key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">current_metadata</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">merge</span><span class="p">:</span>
+                    <span class="n">direct_updates</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">updates</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="n">current_metadata</span><span class="p">[</span><span class="n">key</span><span class="p">]))</span>
+            
+            <span class="n">current_metadata</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">direct_updates</span><span class="p">)</span>
+            
+            <span class="k">if</span> <span class="n">updates</span><span class="p">:</span>
+                <span class="n">merge_tasks</span> <span class="o">=</span> <span class="p">[</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_merge_value</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">,</span> <span class="n">e</span><span class="p">)</span> 
+                    <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">,</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">updates</span>
+                <span class="p">]</span>
+                <span class="n">results</span> <span class="o">=</span> <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span><span class="o">*</span><span class="n">merge_tasks</span><span class="p">,</span> <span class="n">return_exceptions</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                
+                <span class="k">for</span> <span class="n">result</span> <span class="ow">in</span> <span class="n">results</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="ne">Exception</span><span class="p">):</span>
+                        <span class="n">key</span><span class="p">,</span> <span class="n">merged_value</span> <span class="o">=</span> <span class="n">result</span>
+                        <span class="n">current_metadata</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">merged_value</span></div>
+
+
+
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">_merge_value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="n">existing</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Merge two values based on their types.</span>
+<span class="sd">        </span>
+<span class="sd">        :param key: Metadata key</span>
+<span class="sd">        :type key: str</span>
+<span class="sd">        :param value: New value</span>
+<span class="sd">        :type value: Any</span>
+<span class="sd">        :param existing: Existing value</span>
+<span class="sd">        :type existing: Any</span>
+<span class="sd">        :return: Tuple of key and merged value</span>
+<span class="sd">        :rtype: Tuple[str, Any]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">existing</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">):</span>
+            <span class="k">if</span> <span class="nb">set</span><span class="p">(</span><span class="n">value</span><span class="o">.</span><span class="n">columns</span><span class="p">)</span> <span class="o">==</span> <span class="nb">set</span><span class="p">(</span><span class="n">existing</span><span class="o">.</span><span class="n">columns</span><span class="p">):</span>
+                <span class="n">merged_df</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_run_in_executor</span><span class="p">(</span>
+                    <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">,</span> <span class="p">[</span><span class="n">existing</span><span class="p">,</span> <span class="n">value</span><span class="p">],</span> 
+                    <span class="n">ignore_index</span><span class="o">=</span><span class="kc">True</span>
+                <span class="p">)</span>
+                <span class="k">return</span> <span class="n">key</span><span class="p">,</span> <span class="n">merged_df</span>
+            <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2">_new&quot;</span><span class="p">,</span> <span class="n">value</span>
+            
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="p">(</span><span class="nb">dict</span><span class="p">,</span> <span class="n">Dict</span><span class="p">))</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">existing</span><span class="p">,</span> <span class="p">(</span><span class="nb">dict</span><span class="p">,</span> <span class="n">Dict</span><span class="p">)):</span>
+            <span class="k">return</span> <span class="n">key</span><span class="p">,</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_deep_merge_dicts</span><span class="p">(</span><span class="n">existing</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
+            
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">existing</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;&lt;[^&gt;]+&gt;&#39;</span><span class="p">,</span> <span class="n">value</span> <span class="o">+</span> <span class="n">existing</span><span class="p">):</span>
+                <span class="n">ratio</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_run_in_executor</span><span class="p">(</span>
+                    <span class="k">lambda</span><span class="p">:</span> <span class="n">SequenceMatcher</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">existing</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span><span class="o">.</span><span class="n">ratio</span><span class="p">()</span>
+                <span class="p">)</span>
+                <span class="k">if</span> <span class="n">ratio</span> <span class="o">&gt;</span> <span class="mf">0.3</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">value</span><span class="p">)</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="n">existing</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">10000</span><span class="p">:</span>
+                        <span class="n">merged</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_run_in_executor</span><span class="p">(</span>
+                            <span class="bp">self</span><span class="o">.</span><span class="n">_merge_strings</span><span class="p">,</span> <span class="n">existing</span><span class="p">,</span> <span class="n">value</span>
+                        <span class="p">)</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="n">merged</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_merge_strings</span><span class="p">(</span><span class="n">existing</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
+                    <span class="k">return</span> <span class="n">key</span><span class="p">,</span> <span class="n">merged</span>
+            <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2">_new&quot;</span><span class="p">,</span> <span class="n">value</span>
+            
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">))</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">existing</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)):</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">value</span><span class="p">)</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="n">existing</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">10000</span><span class="p">:</span>
+                <span class="n">merged</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_run_in_executor</span><span class="p">(</span>
+                    <span class="k">lambda</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="n">existing</span><span class="p">)</span> <span class="o">+</span> <span class="nb">list</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+                <span class="p">)</span>
+                <span class="k">return</span> <span class="n">key</span><span class="p">,</span> <span class="n">merged</span>
+            <span class="k">return</span> <span class="n">key</span><span class="p">,</span> <span class="nb">list</span><span class="p">(</span><span class="n">existing</span><span class="p">)</span> <span class="o">+</span> <span class="nb">list</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+            
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="nb">set</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">existing</span><span class="p">,</span> <span class="nb">set</span><span class="p">):</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">value</span><span class="p">)</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="n">existing</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">10000</span><span class="p">:</span>
+                <span class="n">merged</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_run_in_executor</span><span class="p">(</span>
+                    <span class="k">lambda</span><span class="p">:</span> <span class="n">existing</span><span class="o">.</span><span class="n">union</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+                <span class="p">)</span>
+                <span class="k">return</span> <span class="n">key</span><span class="p">,</span> <span class="n">merged</span>
+            <span class="k">return</span> <span class="n">key</span><span class="p">,</span> <span class="n">existing</span><span class="o">.</span><span class="n">union</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+            
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">existing</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">merged</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_run_in_executor</span><span class="p">(</span>
+                    <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">,</span> <span class="p">[</span><span class="n">existing</span><span class="p">,</span> <span class="n">value</span><span class="p">]</span>
+                <span class="p">)</span>
+                <span class="k">return</span> <span class="n">key</span><span class="p">,</span> <span class="n">merged</span>
+            <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+                <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2">_new&quot;</span><span class="p">,</span> <span class="n">value</span>
+                
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2">_new&quot;</span><span class="p">,</span> <span class="n">value</span>
+
+
+    <span class="k">def</span> <span class="nf">_merge_strings</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">existing</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Merge two strings using sequence matcher.</span>
+<span class="sd">        </span>
+<span class="sd">        :param existing: Existing string</span>
+<span class="sd">        :type existing: str</span>
+<span class="sd">        :param value: New string</span>
+<span class="sd">        :type value: str</span>
+<span class="sd">        :return: Merged string</span>
+<span class="sd">        :rtype: str</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">merged</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">matcher</span> <span class="o">=</span> <span class="n">SequenceMatcher</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">existing</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">tag</span><span class="p">,</span> <span class="n">i1</span><span class="p">,</span> <span class="n">i2</span><span class="p">,</span> <span class="n">j1</span><span class="p">,</span> <span class="n">j2</span> <span class="ow">in</span> <span class="n">matcher</span><span class="o">.</span><span class="n">get_opcodes</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">tag</span> <span class="o">==</span> <span class="s1">&#39;equal&#39;</span><span class="p">:</span>
+                <span class="n">merged</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">existing</span><span class="p">[</span><span class="n">i1</span><span class="p">:</span><span class="n">i2</span><span class="p">])</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">merged</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">existing</span><span class="p">[</span><span class="n">i1</span><span class="p">:</span><span class="n">i2</span><span class="p">])</span>
+                <span class="n">merged</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">value</span><span class="p">[</span><span class="n">j1</span><span class="p">:</span><span class="n">j2</span><span class="p">])</span>
+        <span class="k">return</span> <span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">merged</span><span class="p">)</span>
+
+
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">_deep_merge_dicts</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">dict1</span><span class="p">:</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">dict2</span><span class="p">:</span> <span class="n">Dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Recursively merge two dictionaries.</span>
+<span class="sd">        </span>
+<span class="sd">        :param dict1: First dictionary</span>
+<span class="sd">        :type dict1: Dict</span>
+<span class="sd">        :param dict2: Second dictionary</span>
+<span class="sd">        :type dict2: Dict</span>
+<span class="sd">        :return: Merged dictionary</span>
+<span class="sd">        :rtype: Dict</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">merged</span> <span class="o">=</span> <span class="n">dict1</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="n">merge_tasks</span> <span class="o">=</span> <span class="p">[]</span>
+        
+        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">dict2</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">if</span> <span class="p">(</span>
+                <span class="n">key</span> <span class="ow">in</span> <span class="n">merged</span> <span class="ow">and</span> 
+                <span class="nb">isinstance</span><span class="p">(</span><span class="n">merged</span><span class="p">[</span><span class="n">key</span><span class="p">],</span> <span class="nb">dict</span><span class="p">)</span> <span class="ow">and</span> 
+                <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="nb">dict</span><span class="p">)</span>
+            <span class="p">):</span>
+                <span class="n">merge_tasks</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">key</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_deep_merge_dicts</span><span class="p">(</span><span class="n">merged</span><span class="p">[</span><span class="n">key</span><span class="p">],</span> <span class="n">value</span><span class="p">)))</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">merged</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span>
+                
+        <span class="k">if</span> <span class="n">merge_tasks</span><span class="p">:</span>
+            <span class="n">results</span> <span class="o">=</span> <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span>
+                <span class="o">*</span><span class="p">(</span><span class="n">task</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">task</span> <span class="ow">in</span> <span class="n">merge_tasks</span><span class="p">)</span>
+            <span class="p">)</span>
+            <span class="k">for</span> <span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">_</span><span class="p">),</span> <span class="n">result</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">merge_tasks</span><span class="p">,</span> <span class="n">results</span><span class="p">):</span>
+                <span class="n">merged</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">result</span>
+                
+        <span class="k">return</span> <span class="n">merged</span>
+
+
+<div class="viewcode-block" id="AgentState.filter_metadata">
+<a class="viewcode-back" href="../../agents/models.html#agents.models.AgentState.filter_metadata">[docs]</a>
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">filter_metadata</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">filter_fn</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">],</span> <span class="nb">bool</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Filter metadata using a predicate function.</span>
+<span class="sd">        </span>
+<span class="sd">        :param filter_fn: Function to filter metadata items</span>
+<span class="sd">        :type filter_fn: Callable[[str, Any], bool]</span>
+<span class="sd">        :return: Filtered metadata dictionary</span>
+<span class="sd">        :rtype: Dict[str, Any]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">async</span> <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">access_metadata</span><span class="p">()</span> <span class="k">as</span> <span class="n">metadata</span><span class="p">:</span>
+            <span class="n">filter_tasks</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_run_in_executor</span><span class="p">(</span><span class="n">filter_fn</span><span class="p">,</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">metadata</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+            <span class="p">]</span>
+            <span class="n">results</span> <span class="o">=</span> <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span><span class="o">*</span><span class="n">filter_tasks</span><span class="p">)</span>
+            <span class="k">return</span> <span class="p">{</span>
+                <span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">),</span> <span class="n">keep</span> 
+                <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">metadata</span><span class="o">.</span><span class="n">items</span><span class="p">(),</span> <span class="n">results</span><span class="p">)</span> 
+                <span class="k">if</span> <span class="n">keep</span>
+            <span class="p">}</span></div>
+
+
+
+<div class="viewcode-block" id="AgentState.transform_metadata">
+<a class="viewcode-back" href="../../agents/models.html#agents.models.AgentState.transform_metadata">[docs]</a>
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">transform_metadata</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">transform_fn</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">],</span> <span class="n">Any</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Transform metadata values using a function.</span>
+<span class="sd">        </span>
+<span class="sd">        :param transform_fn: Function to transform metadata values</span>
+<span class="sd">        :type transform_fn: Callable[[str, Any], Any]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">async</span> <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">access_metadata</span><span class="p">()</span> <span class="k">as</span> <span class="n">metadata</span><span class="p">:</span>
+            <span class="n">transform_tasks</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_run_in_executor</span><span class="p">(</span><span class="n">transform_fn</span><span class="p">,</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">metadata</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+            <span class="p">]</span>
+            <span class="n">results</span> <span class="o">=</span> <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span><span class="o">*</span><span class="n">transform_tasks</span><span class="p">)</span>
+            <span class="n">metadata</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+            <span class="n">metadata</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">metadata</span><span class="o">.</span><span class="n">keys</span><span class="p">(),</span> <span class="n">results</span><span class="p">)))</span></div>
+
+
+
+    <span class="nd">@contextlib</span><span class="o">.</span><span class="n">asynccontextmanager</span> 
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">_async_lock</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Context manager for thread-safe metadata access.</span>
+<span class="sd">        </span>
+<span class="sd">        :yield: None</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_metadata_lock</span><span class="p">:</span>
+            <span class="k">yield</span>
+
+
+    <span class="k">def</span> <span class="fm">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Get string representation of agent state.</span>
+<span class="sd">        </span>
+<span class="sd">        :return: String representation</span>
+<span class="sd">        :rtype: str</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;AgentState(num_messages=</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">messages</span><span class="p">)</span><span class="si">}</span><span class="s2">, num_context_vars=</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">context</span><span class="p">)</span><span class="si">}</span><span class="s2">, num_files=</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">files</span><span class="p">)</span><span class="si">}</span><span class="s2">)&quot;</span>
+
+
+<div class="viewcode-block" id="AgentState.to_dict">
+<a class="viewcode-back" href="../../agents/models.html#agents.models.AgentState.to_dict">[docs]</a>
+    <span class="k">def</span> <span class="nf">to_dict</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Convert agent state to dictionary.</span>
+<span class="sd">        </span>
+<span class="sd">        :return: Dictionary representation of state</span>
+<span class="sd">        :rtype: dict</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s1">&#39;messages&#39;</span><span class="p">:</span> <span class="p">[</span><span class="n">message</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span> <span class="k">for</span> <span class="n">message</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">messages</span><span class="p">],</span>
+            <span class="s1">&#39;metadata&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">metadata</span><span class="o">.</span><span class="n">to_dict</span><span class="p">(),</span>
+            <span class="s1">&#39;context&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">context</span><span class="p">,</span>
+            <span class="s1">&#39;temp_directory&#39;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">temp_directory</span><span class="p">),</span>
+            <span class="s1">&#39;temp_files&#39;</span><span class="p">:</span> <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">file</span><span class="p">)</span> <span class="k">for</span> <span class="n">file</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">list_files</span><span class="p">()],</span>
+            <span class="s1">&#39;temp_files_count&#39;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">list_files</span><span class="p">())</span>
+        <span class="p">}</span></div>
+</div>
+
+
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, Christian de Frondeville, Arijit Nukala, Gubi Ganguly.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

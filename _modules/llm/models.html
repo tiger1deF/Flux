@@ -1,0 +1,350 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>llm.models &mdash; Flux 0.1 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=2709fde1"></script>
+      <script src="../../_static/doctools.js?v=9a2dae69"></script>
+      <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            Flux
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Core Components</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../agents/index.html">Agents</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../llm/index.html">Language Models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../utils/index.html">Utilities</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tests/index.html">Tests</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">Flux</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">llm.models</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for llm.models</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Models for LLM parameter handling and embedding function wrappers.</span>
+
+<span class="sd">This module provides dataclasses and base classes for handling LLM parameters</span>
+<span class="sd">and embedding functions with support for both synchronous and asynchronous operations.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span> <span class="nn">dataclasses</span> <span class="kn">import</span> <span class="n">dataclass</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Type</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Union</span><span class="p">,</span> <span class="n">get_type_hints</span><span class="p">,</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">Awaitable</span><span class="p">,</span> <span class="n">Optional</span>
+<span class="kn">import</span> <span class="nn">inspect</span>
+<span class="kn">import</span> <span class="nn">asyncio</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">threading</span>
+
+
+<div class="viewcode-block" id="LLMParameter">
+<a class="viewcode-back" href="../../llm/models.html#llm.models.LLMParameter">[docs]</a>
+<span class="nd">@dataclass</span>
+<span class="k">class</span> <span class="nc">LLMParameter</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Dataclass representing a parameter for an LLM completion function.</span>
+<span class="sd">    </span>
+<span class="sd">    :ivar name: Name of the parameter</span>
+<span class="sd">    :type name: str</span>
+<span class="sd">    :ivar type: Type of the parameter</span>
+<span class="sd">    :type type: Type</span>
+<span class="sd">    :ivar required: Whether the parameter is required</span>
+<span class="sd">    :type required: bool</span>
+<span class="sd">    :ivar default: Default value for the parameter</span>
+<span class="sd">    :type default: Any</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="nb">type</span><span class="p">:</span> <span class="n">Type</span>
+    <span class="n">required</span><span class="p">:</span> <span class="nb">bool</span>
+    <span class="n">default</span><span class="p">:</span> <span class="n">Any</span> <span class="o">=</span> <span class="kc">None</span></div>
+
+    
+    
+<div class="viewcode-block" id="BaseEmbeddingFunction">
+<a class="viewcode-back" href="../../llm/models.html#llm.models.BaseEmbeddingFunction">[docs]</a>
+<span class="k">class</span> <span class="nc">BaseEmbeddingFunction</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Base class for wrapping embedding functions with standardized interface.</span>
+<span class="sd">    </span>
+<span class="sd">    Provides a unified interface for both synchronous and asynchronous embedding functions,</span>
+<span class="sd">    with support for batching, type inference, and output formatting.</span>
+<span class="sd">    </span>
+<span class="sd">    :param embedding_fn: The embedding function to wrap</span>
+<span class="sd">    :type embedding_fn: Callable</span>
+<span class="sd">    :param dimension: Optional fixed dimension of embeddings</span>
+<span class="sd">    :type dimension: Optional[int]</span>
+<span class="sd">    :param cleanup_fn: Optional cleanup function</span>
+<span class="sd">    :type cleanup_fn: Optional[Callable]</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    
+<div class="viewcode-block" id="BaseEmbeddingFunction.__init__">
+<a class="viewcode-back" href="../../llm/models.html#llm.models.BaseEmbeddingFunction.__init__">[docs]</a>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> 
+                 <span class="n">embedding_fn</span><span class="p">:</span> <span class="n">Callable</span><span class="p">,</span>
+                 <span class="n">dimension</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                 <span class="n">cleanup_fn</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Callable</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initialize the embedding function wrapper.</span>
+<span class="sd">        </span>
+<span class="sd">        :param embedding_fn: The embedding function to wrap</span>
+<span class="sd">        :type embedding_fn: Callable</span>
+<span class="sd">        :param dimension: Optional fixed dimension of embeddings</span>
+<span class="sd">        :type dimension: Optional[int]</span>
+<span class="sd">        :param cleanup_fn: Optional cleanup function</span>
+<span class="sd">        :type cleanup_fn: Optional[Callable]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">is_async</span> <span class="o">=</span> <span class="n">inspect</span><span class="o">.</span><span class="n">iscoroutinefunction</span><span class="p">(</span><span class="n">embedding_fn</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">embedding_fn</span> <span class="o">=</span> <span class="n">embedding_fn</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">is_async</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">_make_async</span><span class="p">(</span><span class="n">embedding_fn</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cleanup_fn</span> <span class="o">=</span> <span class="n">cleanup_fn</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_lock</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span>
+        
+        <span class="n">type_hints</span> <span class="o">=</span> <span class="n">get_type_hints</span><span class="p">(</span><span class="n">embedding_fn</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_accepts_list</span> <span class="o">=</span> <span class="nb">any</span><span class="p">(</span><span class="n">t</span> <span class="o">==</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="ow">or</span> <span class="n">t</span> <span class="o">==</span> <span class="nb">list</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">type_hints</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_accepts_text</span> <span class="o">=</span> <span class="nb">any</span><span class="p">(</span><span class="n">t</span> <span class="o">==</span> <span class="nb">str</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">type_hints</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+        
+        <span class="n">return_type</span> <span class="o">=</span> <span class="n">type_hints</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;return&#39;</span><span class="p">)</span>
+        
+        <span class="k">if</span> <span class="n">return_type</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_format_output</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span>
+            <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">return_type</span><span class="p">,</span> <span class="s1">&#39;__args__&#39;</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">List</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="ow">in</span> <span class="n">return_type</span><span class="o">.</span><span class="n">__args__</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">dimension</span> <span class="o">=</span> <span class="n">dimension</span> <span class="ow">or</span> <span class="mi">0</span>  <span class="c1"># Will be set on first call</span>
+                    <span class="k">return</span>
+                    
+        <span class="k">if</span> <span class="n">dimension</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">dimension</span> <span class="o">=</span> <span class="n">dimension</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_format_output</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span>
+            <span class="k">return</span>
+            
+        <span class="c1"># No type hints or dimension - infer from test run</span>
+        <span class="n">test_result</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">embedding_fn</span><span class="p">(</span><span class="s2">&quot;test input&quot;</span><span class="p">))</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">test_result</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_output_is_nested</span> <span class="o">=</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">test_result</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">))</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_output_is_nested</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">dimension</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">test_result</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_format_output</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="p">[</span><span class="nb">list</span><span class="p">(</span><span class="n">emb</span><span class="p">)</span> <span class="k">for</span> <span class="n">emb</span> <span class="ow">in</span> <span class="n">x</span><span class="p">]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">dimension</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">test_result</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_format_output</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="p">[</span><span class="nb">list</span><span class="p">(</span><span class="n">x</span><span class="p">)]</span>
+                
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">test_result</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_output_is_nested</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">test_result</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_output_is_nested</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">dimension</span> <span class="o">=</span> <span class="n">test_result</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_format_output</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">dimension</span> <span class="o">=</span> <span class="n">test_result</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_format_output</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="p">[</span><span class="n">x</span><span class="o">.</span><span class="n">tolist</span><span class="p">()]</span></div>
+
+    
+    
+    <span class="k">def</span> <span class="nf">_make_async</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sync_fn</span><span class="p">:</span> <span class="n">Callable</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Callable</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Convert a synchronous function to an asynchronous one.</span>
+<span class="sd">        </span>
+<span class="sd">        :param sync_fn: Synchronous function to convert</span>
+<span class="sd">        :type sync_fn: Callable</span>
+<span class="sd">        :return: Asynchronous wrapper function</span>
+<span class="sd">        :rtype: Callable</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">async</span> <span class="k">def</span> <span class="nf">async_wrapper</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+            <span class="n">loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_event_loop</span><span class="p">()</span>
+            <span class="k">return</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="k">lambda</span><span class="p">:</span> <span class="n">sync_fn</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">))</span>
+        
+        <span class="k">return</span> <span class="n">async_wrapper</span>
+    
+    
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">_batch_embed</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">texts</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">batch_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">32</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">float</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Batch process multiple texts for embedding.</span>
+<span class="sd">        </span>
+<span class="sd">        :param texts: List of texts to embed</span>
+<span class="sd">        :type texts: List[str]</span>
+<span class="sd">        :param batch_size: Size of batches to process</span>
+<span class="sd">        :type batch_size: int</span>
+<span class="sd">        :return: List of embedding vectors</span>
+<span class="sd">        :rtype: List[List[float]]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">batches</span> <span class="o">=</span> <span class="p">[</span><span class="n">texts</span><span class="p">[</span><span class="n">i</span><span class="p">:</span><span class="n">i</span> <span class="o">+</span> <span class="n">batch_size</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">texts</span><span class="p">),</span> <span class="n">batch_size</span><span class="p">)]</span>
+        <span class="n">all_results</span> <span class="o">=</span> <span class="p">[]</span>
+        
+        <span class="k">for</span> <span class="n">batch</span> <span class="ow">in</span> <span class="n">batches</span><span class="p">:</span>
+            <span class="k">async</span> <span class="k">with</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">Semaphore</span><span class="p">(</span><span class="n">batch_size</span><span class="p">):</span>
+                <span class="n">tasks</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">embedding_fn</span><span class="p">(</span><span class="n">text</span><span class="p">)</span> <span class="k">for</span> <span class="n">text</span> <span class="ow">in</span> <span class="n">batch</span><span class="p">]</span>
+                <span class="n">batch_results</span> <span class="o">=</span> <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span><span class="o">*</span><span class="n">tasks</span><span class="p">)</span>
+                <span class="n">all_results</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">batch_results</span><span class="p">)</span>
+        
+        <span class="k">return</span> <span class="n">all_results</span>
+    
+    
+<div class="viewcode-block" id="BaseEmbeddingFunction.__call__">
+<a class="viewcode-back" href="../../llm/embeddings.html#llm.models.BaseEmbeddingFunction.__call__">[docs]</a>
+    <span class="k">async</span> <span class="k">def</span> <span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">float</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Get embedding for a single text.</span>
+<span class="sd">        </span>
+<span class="sd">        :param text: Text to embed</span>
+<span class="sd">        :type text: str</span>
+<span class="sd">        :return: Embedding vector</span>
+<span class="sd">        :rtype: List[float]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">async</span> <span class="k">with</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">Lock</span><span class="p">():</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">embedding_fn</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+        
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">dimension</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">dimension</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_format_output</span><span class="p">(</span><span class="n">result</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="nb">list</span><span class="p">)</span> <span class="k">else</span> <span class="n">result</span></div>
+
+    
+    
+<div class="viewcode-block" id="BaseEmbeddingFunction.embed">
+<a class="viewcode-back" href="../../llm/models.html#llm.models.BaseEmbeddingFunction.embed">[docs]</a>
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">embed</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">text</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="n">Union</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">float</span><span class="p">],</span> <span class="n">List</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">float</span><span class="p">]]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Get embeddings for one or more texts.</span>
+<span class="sd">        </span>
+<span class="sd">        :param text: Text or list of texts to embed</span>
+<span class="sd">        :type text: Union[str, List[str]]</span>
+<span class="sd">        :return: Single embedding vector or list of vectors</span>
+<span class="sd">        :rtype: Union[List[float], List[List[float]]]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">is_list_input</span> <span class="o">=</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">text</span><span class="p">,</span> <span class="nb">list</span><span class="p">)</span>
+        
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_accepts_list</span> <span class="ow">and</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_accepts_text</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">is_list_input</span><span class="p">:</span>
+                <span class="n">text</span> <span class="o">=</span> <span class="p">[</span><span class="n">text</span><span class="p">]</span>
+            <span class="k">async</span> <span class="k">with</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">Lock</span><span class="p">():</span>
+                <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">embedding_fn</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+                <span class="n">formatted</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_format_output</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+                <span class="k">return</span> <span class="n">formatted</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">is_list_input</span> <span class="k">else</span> <span class="n">formatted</span>
+            
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">_accepts_text</span> <span class="ow">and</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_accepts_list</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">is_list_input</span><span class="p">:</span>
+                <span class="n">results</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_batch_embed</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_format_output</span><span class="p">(</span><span class="n">results</span><span class="p">)</span>
+            <span class="k">async</span> <span class="k">with</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">Lock</span><span class="p">():</span>
+                <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">embedding_fn</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_format_output</span><span class="p">(</span><span class="n">result</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+            
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">async</span> <span class="k">with</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">Lock</span><span class="p">():</span>
+                <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">embedding_fn</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+                <span class="n">formatted</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_format_output</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+                <span class="k">return</span> <span class="n">formatted</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">is_list_input</span> <span class="k">else</span> <span class="n">formatted</span></div>
+
+    
+    
+<div class="viewcode-block" id="BaseEmbeddingFunction.cleanup">
+<a class="viewcode-back" href="../../llm/models.html#llm.models.BaseEmbeddingFunction.cleanup">[docs]</a>
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">cleanup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Clean up resources used by the embedding function.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cleanup_fn</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">inspect</span><span class="o">.</span><span class="n">iscoroutinefunction</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">cleanup_fn</span><span class="p">):</span>
+                <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">cleanup_fn</span><span class="p">()</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_event_loop</span><span class="p">()</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">cleanup_fn</span><span class="p">)</span></div>
+
+    
+    
+    <span class="k">async</span> <span class="k">def</span> <span class="fm">__aenter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Async context manager entry.</span>
+<span class="sd">        </span>
+<span class="sd">        :return: Self</span>
+<span class="sd">        :rtype: BaseEmbeddingFunction</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span>
+    
+    
+    <span class="k">async</span> <span class="k">def</span> <span class="fm">__aexit__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exc_type</span><span class="p">,</span> <span class="n">exc_val</span><span class="p">,</span> <span class="n">exc_tb</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Async context manager exit.</span>
+<span class="sd">        </span>
+<span class="sd">        :param exc_type: Exception type if an error occurred</span>
+<span class="sd">        :param exc_val: Exception value if an error occurred</span>
+<span class="sd">        :param exc_tb: Exception traceback if an error occurred</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">cleanup</span><span class="p">()</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, Christian de Frondeville, Arijit Nukala, Gubi Ganguly.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

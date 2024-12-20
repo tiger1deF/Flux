@@ -1,6 +1,9 @@
 Core Agent
 ==========
 
+.. module:: agents.agent.models
+   :synopsis: Core agent implementation and base classes.
+
 Base Agent Interface
 ------------------
 .. autoclass:: agents.agent.models.Agent
@@ -22,15 +25,6 @@ Base Agent Implementation
 Tool Calling
 -----------
 .. automodule:: agents.agent.tool-calling.react
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :special-members: __init__
-
-
-State Management
---------------
-.. automodule:: agents.agent.state
    :members:
    :undoc-members:
    :show-inheritance:

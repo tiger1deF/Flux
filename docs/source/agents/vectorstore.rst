@@ -1,6 +1,9 @@
 Vector Store
 ============
 
+.. module:: agents.vectorstore.models
+   :synopsis: Vector store implementations for embedding storage and retrieval.
+
 Base Vector Store Interface
 -------------------------
 .. autoclass:: agents.vectorstore.models.BaseVectorStore

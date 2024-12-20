@@ -1,8 +1,14 @@
 Inference
 =========
 
+.. module:: llm.inference
+   :synopsis: LLM inference implementations.
+
 Pulse Inference
 -------------
+
+.. module:: llm.inference.pulse
+   :synopsis: Pulse model inference.
 
 Synchronous
 ~~~~~~~~~~
@@ -22,6 +28,9 @@ Asynchronous
 
 Gemini Inference
 --------------
+
+.. module:: llm.inference.gemini
+   :synopsis: Gemini model inference.
 
 Synchronous
 ~~~~~~~~~~

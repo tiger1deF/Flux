@@ -1,8 +1,11 @@
 Language Models
 ===============
 
-Base LLM Implementation
----------------------
+.. module:: llm
+   :synopsis: Language model implementations and interfaces.
+
+Base LLM Interface
+----------------
 .. automodule:: llm.llm
    :members:
    :undoc-members:
@@ -20,12 +23,16 @@ LLM Models
 Embeddings
 ---------
 
+.. module:: llm.embeddings
+   :synopsis: Embedding model implementations.
+
 Pulse Embeddings
 ~~~~~~~~~~~~~~
 .. automodule:: llm.embeddings.pulse
    :members:
    :undoc-members:
    :show-inheritance:
+   :special-members: __init__
 
 Gemini Embeddings
 ~~~~~~~~~~~~~~~
@@ -33,10 +40,12 @@ Gemini Embeddings
    :members:
    :undoc-members:
    :show-inheritance:
+   :special-members: __init__
 
 Local Embeddings
 ~~~~~~~~~~~~~~
 .. automodule:: llm.embeddings.local
    :members:
    :undoc-members:
-   :show-inheritance: 
+   :show-inheritance:
+   :special-members: __init__ 

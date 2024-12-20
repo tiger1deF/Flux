@@ -1,27 +1,30 @@
 # Flux: Advanced AI Agent Framework
 
-Flux is a powerful Python framework for building configurable AI agents with advanced capabilities including LLM integration, vector storage, and comprehensive monitoring.
+Flux is a powerful Python framework built from the ground up with asynchronous execution at its core. It provides a modern, async-first approach to building AI agents, featuring non-blocking LLM integration, concurrent vector operations, and real-time monitoring capabilities.
 
 ## 🌟 Key Features
 
 ### 🤖 Configurable Agents
+- Built on asyncio for non-blocking, concurrent operations
 - Flexible agent configuration with different logging modes
 - Tool integration with React-style reasoning
 - Robust message handling and state management
 - Vector store integration for context management
-- Async-first design for optimal performance
+- Parallel processing of multiple agent tasks
 
 ### 🧠 LLM Integration
 - Support for multiple LLM providers (Gemini, Pulse)
-- Both async and sync inference modes
+- Asynchronous inference with automatic batching
+- Non-blocking embedding generation
 - Built-in embedding generation and management
 - Smart token handling and context management
 
 ### 🛠️ Utilities
+- Concurrent file and metadata operations
 - Efficient serialization with msgpack and orjson
 - Text summarization and truncation capabilities
 - Shared tokenizer functionality
-- Advanced file and metadata management
+- Thread-safe resource management
 - Comprehensive logging and monitoring
 
 ## 📦 Installation
@@ -39,6 +42,7 @@ pip install flux-agents[torch]
 
 ```python
 from agents import Agent, Message, AgentConfig, Logging
+import asyncio
 
 # Create an agent with basic logging
 agent = Agent(
@@ -49,8 +53,25 @@ agent = Agent(
     )
 )
 
-# Send a message
-response = await agent(Message(content="Hello, world!"))
+# Example of concurrent agent operations
+async def main():
+    # Create multiple messages
+    messages = [
+        Message(content="What is the weather?"),
+        Message(content="Tell me a joke"),
+        Message(content="Write a poem")
+    ]
+    
+    # Process messages concurrently
+    responses = await asyncio.gather(*[
+        agent(msg) for msg in messages
+    ])
+    
+    for msg, response in zip(messages, responses):
+        print(f"Q: {msg.content}\nA: {response.content}\n")
+
+# Run the example
+asyncio.run(main())
 ```
 
 ## 📊 Core Components
@@ -59,16 +80,19 @@ response = await agent(Message(content="Hello, world!"))
 - Base agent implementation with configurable behaviors
 - React-style agents for tool integration
 - Vector chat capabilities
-- Message handling and state management
+- Concurrent message processing
+- Thread-safe state management
 
 ### Monitoring
 - Comprehensive logging system
+- Real-time monitoring with async logging
 - Support for multiple logging backends
 - Integration with LangFuse
 - Detailed agent activity tracking
 
 ### Storage
-- Vector store integration
+- Concurrent vector operations with HNSW
+- Asynchronous file I/O
 - File management system
 - Serialization utilities
 - State persistence

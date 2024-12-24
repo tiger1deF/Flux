@@ -1,0 +1,410 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>llm.llm &mdash; Flux 0.2 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=10f1778b"></script>
+      <script src="../../_static/doctools.js?v=9a2dae69"></script>
+      <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            Flux
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Core Components</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../agents/index.html">Agents</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../llm/index.html">Language Models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../utils/index.html">Utilities</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tests/index.html">Tests</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">Flux</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">llm.llm</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for llm.llm</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">Type</span><span class="p">,</span> <span class="n">get_type_hints</span><span class="p">,</span> <span class="n">Union</span><span class="p">,</span> <span class="n">Coroutine</span>
+<span class="kn">import</span> <span class="nn">inspect</span>
+<span class="kn">from</span> <span class="nn">functools</span> <span class="kn">import</span> <span class="n">lru_cache</span>
+<span class="kn">import</span> <span class="nn">weakref</span>
+<span class="kn">import</span> <span class="nn">asyncio</span>
+<span class="kn">import</span> <span class="nn">threading</span>
+<span class="kn">import</span> <span class="nn">types</span>
+
+<span class="kn">from</span> <span class="nn">llm.models</span> <span class="kn">import</span> <span class="n">LLMParameter</span>
+
+
+<div class="viewcode-block" id="LLM">
+<a class="viewcode-back" href="../../llm/models.html#llm.LLM">[docs]</a>
+<span class="k">class</span> <span class="nc">LLM</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Flux wrapper class for LLM completion functions.</span>
+
+<span class="sd">    This class provides a standardized interface for both synchronous and asynchronous</span>
+<span class="sd">    completion functions, handling parameter validation, type checking, thread safe,</span>
+<span class="sd">    and supports token limiting.</span>
+
+<span class="sd">    :param completion_fn: The completion function to wrap</span>
+<span class="sd">    :type completion_fn: Callable</span>
+<span class="sd">    :param default_params: Default parameters to pass to the completion function</span>
+<span class="sd">    :type default_params: Dict[str, Any]</span>
+
+<span class="sd">    Note - The following parameters are stored defaults, and won&#39;t be used unless the input function</span>
+<span class="sd">    has the same parameter name.</span>
+<span class="sd">    </span>
+<span class="sd">    :ivar top_p: Top-p sampling parameter</span>
+<span class="sd">    :type top_p: float</span>
+<span class="sd">    :ivar temperature: Temperature parameter for controlling randomness</span>
+<span class="sd">    :type temperature: float</span>
+<span class="sd">    :ivar max_tokens: Maximum number of tokens in the response</span>
+<span class="sd">    :type max_tokens: int</span>
+<span class="sd">    :ivar input_tokens: Maximum number of tokens in the input</span>
+<span class="sd">    :type input_tokens: int</span>
+<span class="sd">    :ivar system_prompt: System prompt to prepend to queries</span>
+<span class="sd">    :type system_prompt: str</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">_function_cache</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="n">Callable</span><span class="p">,</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]</span> <span class="o">=</span> <span class="n">weakref</span><span class="o">.</span><span class="n">WeakKeyDictionary</span><span class="p">()</span>
+    <span class="n">_thread_local</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">local</span><span class="p">()</span>
+    <span class="n">_lock</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span>
+    
+    <span class="c1"># Standard parameters</span>
+    <span class="n">top_p</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.9</span>
+    <span class="n">temperature</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.1</span>
+    <span class="n">max_tokens</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">2_000</span>
+    <span class="n">system_prompt</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">context_length</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10_000</span>
+
+    <span class="c1"># Parameter mapping for normalization</span>
+    <span class="n">CONTEXT_LENGTH_PARAMS</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;context_length&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;input_tokens&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;context_window&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;max_input_tokens&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;max_context_length&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;context_window_size&quot;</span><span class="p">,</span>
+    <span class="p">}</span>
+
+    <span class="n">MAX_TOKENS_PARAMS</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;max_tokens&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;response_tokens&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;output_tokens&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;max_output_tokens&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;max_completion_tokens&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;completion_tokens&quot;</span><span class="p">,</span>
+    <span class="p">}</span>
+    
+
+<div class="viewcode-block" id="LLM.__init__">
+<a class="viewcode-back" href="../../llm/models.html#llm.LLM.__init__">[docs]</a>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">completion_fn</span><span class="p">:</span> <span class="n">Callable</span><span class="p">,</span> <span class="o">**</span><span class="n">default_params</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initialize the LLM wrapper.</span>
+
+<span class="sd">        :param completion_fn: The completion function to wrap</span>
+<span class="sd">        :type completion_fn: Callable</span>
+<span class="sd">        :param default_params: Default parameters to pass to the completion function. Can be anything.</span>
+<span class="sd">        :type default_params: Dict[str, Any]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">completion_fn</span> <span class="o">=</span> <span class="n">completion_fn</span>  
+        <span class="bp">self</span><span class="o">.</span><span class="n">is_async</span> <span class="o">=</span> <span class="n">inspect</span><span class="o">.</span><span class="n">iscoroutinefunction</span><span class="p">(</span><span class="n">completion_fn</span><span class="p">)</span>
+        
+        <span class="c1"># Normalize parameters first</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">default_params</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_normalize_parameters</span><span class="p">(</span><span class="n">default_params</span><span class="p">)</span>
+        
+        <span class="n">cached_inspection</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_function_cache</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">completion_fn</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">cached_inspection</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">parameters</span> <span class="o">=</span> <span class="n">cached_inspection</span><span class="p">[</span><span class="s1">&#39;parameters&#39;</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">input_param_name</span> <span class="o">=</span> <span class="n">cached_inspection</span><span class="p">[</span><span class="s1">&#39;input_param_name&#39;</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_call_impl</span> <span class="o">=</span> <span class="n">cached_inspection</span><span class="p">[</span><span class="s1">&#39;call_impl&#39;</span><span class="p">]</span>
+            
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_inspect_function</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_build_call_implementation</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_function_cache</span><span class="p">[</span><span class="n">completion_fn</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="s1">&#39;parameters&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">parameters</span><span class="p">,</span>
+                <span class="s1">&#39;input_param_name&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">input_param_name</span><span class="p">,</span>
+                <span class="s1">&#39;call_impl&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_call_impl</span>
+            <span class="p">}</span>
+       
+        <span class="bp">self</span><span class="o">.</span><span class="n">_validate_types</span><span class="p">(</span><span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="n">default_params</span><span class="p">)</span></div>
+
+
+    <span class="k">def</span> <span class="nf">_normalize_parameters</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">params</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Normalize parameter names while preserving originals.&quot;&quot;&quot;</span>
+        <span class="n">normalized</span> <span class="o">=</span> <span class="n">params</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        
+        <span class="c1"># Handle context length parameters</span>
+        <span class="k">for</span> <span class="n">param</span> <span class="ow">in</span> <span class="n">params</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">param</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">CONTEXT_LENGTH_PARAMS</span> <span class="ow">and</span> <span class="n">param</span> <span class="o">!=</span> <span class="s2">&quot;context_length&quot;</span><span class="p">:</span>
+                <span class="n">normalized</span><span class="p">[</span><span class="s2">&quot;context_length&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="n">param</span><span class="p">]</span>
+                
+        <span class="c1"># Handle max tokens parameters</span>
+        <span class="k">for</span> <span class="n">param</span> <span class="ow">in</span> <span class="n">params</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">param</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">MAX_TOKENS_PARAMS</span> <span class="ow">and</span> <span class="n">param</span> <span class="o">!=</span> <span class="s2">&quot;max_tokens&quot;</span><span class="p">:</span>
+                <span class="n">normalized</span><span class="p">[</span><span class="s2">&quot;max_tokens&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="n">param</span><span class="p">]</span>
+        
+        <span class="k">return</span> <span class="n">normalized</span>
+
+    <span class="k">def</span> <span class="nf">_build_call_implementation</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Build optimized call implementation.&quot;&quot;&quot;</span>
+        <span class="n">valid_params</span> <span class="o">=</span> <span class="p">{</span><span class="n">param</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">param</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">parameters</span><span class="p">}</span>
+        
+        <span class="c1"># Pre-compute filtered default args</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_filtered_defaults</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_params</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> 
+            <span class="k">if</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">valid_params</span>
+        <span class="p">}</span>
+        
+        <span class="c1"># Pre-compute token limit check</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_has_token_limit</span> <span class="o">=</span> <span class="nb">any</span><span class="p">(</span>
+            <span class="n">param</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">CONTEXT_LENGTH_PARAMS</span><span class="o">.</span><span class="n">union</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">MAX_TOKENS_PARAMS</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">param</span> <span class="ow">in</span> <span class="n">valid_params</span>
+        <span class="p">)</span>
+        
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">is_async</span><span class="p">:</span>
+            <span class="k">async</span> <span class="k">def</span> <span class="nf">_call_impl</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+                <span class="c1"># Start with pre-filtered defaults</span>
+                <span class="n">call_args</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_filtered_defaults</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+                
+                <span class="c1"># Update with filtered kwargs</span>
+                <span class="n">call_args</span><span class="o">.</span><span class="n">update</span><span class="p">({</span>
+                    <span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> 
+                    <span class="k">if</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">valid_params</span>
+                <span class="p">})</span>
+                
+                <span class="c1"># Normalize any new parameters from kwargs</span>
+                <span class="n">normalized_kwargs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_normalize_parameters</span><span class="p">(</span><span class="n">kwargs</span><span class="p">)</span>
+                <span class="n">call_args</span><span class="o">.</span><span class="n">update</span><span class="p">({</span>
+                    <span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">normalized_kwargs</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+                    <span class="k">if</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">valid_params</span> <span class="ow">and</span> <span class="n">k</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">kwargs</span>
+                <span class="p">})</span>
+                
+                <span class="c1"># Prepare input text</span>
+                <span class="n">input_text</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">system_prompt</span><span class="si">}</span><span class="se">\n\n</span><span class="si">{</span><span class="n">query</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">system_prompt</span> <span class="k">else</span> <span class="n">query</span>
+                <span class="n">call_args</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">input_param_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">input_text</span>
+                
+                <span class="k">return</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">completion_fn</span><span class="p">(</span><span class="o">**</span><span class="n">call_args</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">def</span> <span class="nf">_call_impl</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+                <span class="c1"># Start with pre-filtered defaults</span>
+                <span class="n">call_args</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_filtered_defaults</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+                
+                <span class="c1"># Update with filtered kwargs</span>
+                <span class="n">call_args</span><span class="o">.</span><span class="n">update</span><span class="p">({</span>
+                    <span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> 
+                    <span class="k">if</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">valid_params</span>
+                <span class="p">})</span>
+                
+                <span class="c1"># Normalize any new parameters from kwargs</span>
+                <span class="n">normalized_kwargs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_normalize_parameters</span><span class="p">(</span><span class="n">kwargs</span><span class="p">)</span>
+                <span class="n">call_args</span><span class="o">.</span><span class="n">update</span><span class="p">({</span>
+                    <span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">normalized_kwargs</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+                    <span class="k">if</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">valid_params</span> <span class="ow">and</span> <span class="n">k</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">kwargs</span>
+                <span class="p">})</span>
+                
+                <span class="c1"># Prepare input text</span>
+                <span class="n">input_text</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">system_prompt</span><span class="si">}</span><span class="se">\n\n</span><span class="si">{</span><span class="n">query</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">system_prompt</span> <span class="k">else</span> <span class="n">query</span>
+            
+                <span class="n">call_args</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">input_param_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">input_text</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">completion_fn</span><span class="p">(</span><span class="o">**</span><span class="n">call_args</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_call_impl</span> <span class="o">=</span> <span class="n">types</span><span class="o">.</span><span class="n">MethodType</span><span class="p">(</span><span class="n">_call_impl</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="LLM.__call__">
+<a class="viewcode-back" href="../../llm/models.html#llm.LLM.__call__">[docs]</a>
+    <span class="k">def</span> <span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Union</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Coroutine</span><span class="p">[</span><span class="n">Any</span><span class="p">,</span> <span class="n">Any</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Call implementation that properly handles sync/async contexts&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_call_impl</span><span class="p">(</span><span class="n">query</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+
+
+    <span class="nd">@staticmethod</span>
+    <span class="nd">@lru_cache</span><span class="p">(</span><span class="n">maxsize</span> <span class="o">=</span> <span class="mi">128</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">_get_type_hints</span><span class="p">(</span><span class="n">func</span><span class="p">:</span> <span class="n">Callable</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Type</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Get cached type hints for a function.</span>
+
+<span class="sd">        :param func: The function to get type hints for</span>
+<span class="sd">        :type func: Callable</span>
+<span class="sd">        :return: Dictionary of parameter names to their types</span>
+<span class="sd">        :rtype: Dict[str, Type]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">get_type_hints</span><span class="p">(</span><span class="n">func</span><span class="p">)</span>
+
+
+    <span class="k">def</span> <span class="nf">_inspect_function</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Inspect the completion function to determine its parameters and input parameter.</span>
+<span class="sd">        </span>
+<span class="sd">        This method analyzes the function signature and type hints to set up proper</span>
+<span class="sd">        parameter handling and identify the main input parameter.</span>
+
+<span class="sd">        :raises ValueError: If no suitable input parameter is found</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">signature</span> <span class="o">=</span> <span class="n">inspect</span><span class="o">.</span><span class="n">signature</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">completion_fn</span><span class="p">)</span>
+        <span class="n">type_hints</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_type_hints</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">completion_fn</span><span class="p">)</span>
+        
+        <span class="bp">self</span><span class="o">.</span><span class="n">parameters</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">input_param_name</span> <span class="o">=</span> <span class="kc">None</span>
+        
+        <span class="n">input_param_priorities</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;text&quot;</span><span class="p">,</span> <span class="s2">&quot;prompt&quot;</span><span class="p">,</span> <span class="s2">&quot;query&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;message&quot;</span><span class="p">,</span> <span class="s2">&quot;content&quot;</span>
+        <span class="p">}</span>
+
+        <span class="k">for</span> <span class="n">param_name</span><span class="p">,</span> <span class="n">param</span> <span class="ow">in</span> <span class="n">signature</span><span class="o">.</span><span class="n">parameters</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">param_type</span> <span class="o">=</span> <span class="n">type_hints</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">param_name</span><span class="p">,</span> <span class="n">Any</span><span class="p">)</span>
+            <span class="n">required</span> <span class="o">=</span> <span class="n">param</span><span class="o">.</span><span class="n">default</span> <span class="o">==</span> <span class="n">param</span><span class="o">.</span><span class="n">empty</span>
+            <span class="n">default</span> <span class="o">=</span> <span class="kc">None</span> <span class="k">if</span> <span class="n">param</span><span class="o">.</span><span class="n">default</span> <span class="o">==</span> <span class="n">param</span><span class="o">.</span><span class="n">empty</span> <span class="k">else</span> <span class="n">param</span><span class="o">.</span><span class="n">default</span>
+
+            <span class="k">if</span> <span class="n">param_name</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_params</span><span class="p">:</span>
+                <span class="n">required</span> <span class="o">=</span> <span class="kc">False</span>
+                <span class="n">default</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_params</span><span class="p">[</span><span class="n">param_name</span><span class="p">]</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">parameters</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">LLMParameter</span><span class="p">(</span>
+                <span class="n">name</span> <span class="o">=</span> <span class="n">param_name</span><span class="p">,</span>
+                <span class="nb">type</span> <span class="o">=</span> <span class="n">param_type</span><span class="p">,</span>
+                <span class="n">required</span> <span class="o">=</span> <span class="n">required</span><span class="p">,</span>
+                <span class="n">default</span> <span class="o">=</span> <span class="n">default</span>
+            <span class="p">))</span>
+
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">input_param_name</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">param_type</span> <span class="o">==</span> <span class="nb">str</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">param_name</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="ow">in</span> <span class="n">input_param_priorities</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">input_param_name</span> <span class="o">=</span> <span class="n">param_name</span>
+                <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">input_param_name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">input_param_name</span> <span class="o">=</span> <span class="n">param_name</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">input_param_name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;No suitable input parameter found in completion function&quot;</span><span class="p">)</span>
+
+
+    <span class="k">def</span> <span class="nf">_validate_types</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Validate and convert parameter types according to the function signature.</span>
+
+<span class="sd">        :param kwargs: Parameters to validate</span>
+<span class="sd">        :type kwargs: Dict[str, Any]</span>
+<span class="sd">        :raises TypeError: If parameter types don&#39;t match and can&#39;t be converted</span>
+<span class="sd">        :raises ValueError: If a required parameter is missing</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">param</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">parameters</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">param</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">input_param_name</span><span class="p">:</span>
+                <span class="k">continue</span>
+            
+            <span class="k">if</span> <span class="n">param</span><span class="o">.</span><span class="n">name</span> <span class="ow">in</span> <span class="n">kwargs</span><span class="p">:</span>
+                <span class="n">value</span> <span class="o">=</span> <span class="n">kwargs</span><span class="p">[</span><span class="n">param</span><span class="o">.</span><span class="n">name</span><span class="p">]</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">param</span><span class="o">.</span><span class="n">type</span><span class="p">):</span>
+                    <span class="k">try</span><span class="p">:</span>
+                        <span class="n">kwargs</span><span class="p">[</span><span class="n">param</span><span class="o">.</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">param</span><span class="o">.</span><span class="n">type</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+                    <span class="k">except</span> <span class="p">(</span><span class="ne">ValueError</span><span class="p">,</span> <span class="ne">TypeError</span><span class="p">):</span>
+                        <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span>
+                            <span class="sa">f</span><span class="s2">&quot;Parameter &#39;</span><span class="si">{</span><span class="n">param</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; expects type </span><span class="si">{</span><span class="n">param</span><span class="o">.</span><span class="n">type</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">, &quot;</span>
+                            <span class="sa">f</span><span class="s2">&quot;got </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">value</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&quot;</span>
+                        <span class="p">)</span>
+            <span class="k">elif</span> <span class="n">param</span><span class="o">.</span><span class="n">required</span> <span class="ow">and</span> <span class="n">param</span><span class="o">.</span><span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_params</span><span class="p">:</span>
+                <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">param</span><span class="o">.</span><span class="n">name</span><span class="p">):</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">default_params</span><span class="p">[</span><span class="n">param</span><span class="o">.</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">param</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Required parameter &#39;</span><span class="si">{</span><span class="n">param</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; not provided&quot;</span><span class="p">)</span>
+
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">signature</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Get the signature information for the wrapped completion function.</span>
+
+<span class="sd">        :return: Dictionary containing parameter information including types, requirements,</span>
+<span class="sd">                default values, and whether it&#39;s the input parameter</span>
+<span class="sd">        :rtype: Dict[str, Dict[str, Any]]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="n">param</span><span class="o">.</span><span class="n">name</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="n">param</span><span class="o">.</span><span class="n">type</span><span class="o">.</span><span class="vm">__name__</span><span class="p">,</span>
+                <span class="s2">&quot;required&quot;</span><span class="p">:</span> <span class="n">param</span><span class="o">.</span><span class="n">required</span><span class="p">,</span>
+                <span class="s2">&quot;default&quot;</span><span class="p">:</span> <span class="n">param</span><span class="o">.</span><span class="n">default</span> <span class="k">if</span> <span class="n">param</span><span class="o">.</span><span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_params</span> 
+                    <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_params</span><span class="p">[</span><span class="n">param</span><span class="o">.</span><span class="n">name</span><span class="p">],</span>
+                <span class="s2">&quot;is_input&quot;</span><span class="p">:</span> <span class="n">param</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">input_param_name</span>
+            <span class="p">}</span>
+            <span class="k">for</span> <span class="n">param</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">parameters</span>
+        <span class="p">}</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, Christian de Frondeville.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

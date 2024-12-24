@@ -13,8 +13,9 @@ import traceback
 
 from langfuse import Langfuse
 
-from agents.models import AgentStatus
-from agents.messages.models import Message, Sender
+from agents.config.models import AgentStatus
+
+from agents.messages.message import Message, Sender, MessageType
 
 
 def langfuse_agent_wrapper(func):
@@ -47,7 +48,6 @@ def langfuse_agent_wrapper(func):
         """
         # Initialize Langfuse client
         langfuse = Langfuse()
-        trace = None
         logging_tasks = []
         start_time = datetime.now()
     
@@ -58,11 +58,14 @@ def langfuse_agent_wrapper(func):
         else:
             raise ValueError("Input Message class is required for agent!")
                 
-        state = kwargs.get('state')
-        if state:
+        if state := kwargs.get('state'):
             self.state = state
                 
         self.agent_status = AgentStatus.RUNNING
+        
+        input_message.type = MessageType.INPUT
+        # Use state message store
+        await self.state.add_message(input_message)
         
         await self.agent_log.log_input(input_message)
         
@@ -73,8 +76,18 @@ def langfuse_agent_wrapper(func):
             
             if not isinstance(result, Message):
                 raise ValueError("Output Message class is required for agent!")
-                            
-            for message in self.messages:
+                     
+            result.type = MessageType.OUTPUT
+            # Use state message store
+            await self.state.add_message(result)
+                       
+            # Get messages from state store for logging
+            messages = await self.state.obtain_message_context(
+                query=None,
+                context_config=self.config.context,
+                truncate=False
+            )
+            for message in messages:
                 logging_tasks.append(self.agent_log.log_message(message))
             
             await self.agent_log.log_output(result)
@@ -85,11 +98,10 @@ def langfuse_agent_wrapper(func):
                 )
             )
 
-            self.output_messages[end_time] = result
-            
             await asyncio.gather(*logging_tasks)
                         
             self.agent_status = AgentStatus.COMPLETED
+            
             return result
             
         except Exception as e:
@@ -108,10 +120,12 @@ def langfuse_agent_wrapper(func):
                 content = error,
                 sender = Sender.AI,
                 agent_name = self.name,
-                date = end_time
+                date = end_time,
+                type = MessageType.ERROR
             )
             
-            self.error_messages[end_time] = error_message
+            # Use state message store
+            await self.state.add_message(error_message)
                         
             return error_message
         

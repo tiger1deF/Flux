@@ -8,8 +8,9 @@ to agent functions, including input/output tracking, timing, and error logging.
 from datetime import datetime   
 import asyncio
 
-from agents.models import AgentStatus
-from agents.messages.models import Message, Sender
+from agents.config.models import AgentStatus
+
+from agents.messages.message import Message, Sender, MessageType
 
 
 def logging_agent_wrapper(func):
@@ -48,12 +49,13 @@ def logging_agent_wrapper(func):
             raise ValueError("Input Message class is required for agent!")
             
         if input_message:
-            self.input_messages[start_time] = input_message
+            input_message.type = MessageType.INPUT
+            # Use state message store
+            await self.state.add_message(input_message)
         else:
             raise ValueError("Input Message class is required for agent!")
                 
-        state = kwargs.get('state')
-        if state:
+        if state := kwargs.get('state'):
             self.state = state
                 
         try:
@@ -68,7 +70,13 @@ def logging_agent_wrapper(func):
             if not isinstance(result, Message):
                 raise ValueError("Output Message class is required for agent!")
             
-            for message in self.messages:
+            # Get messages from state store for logging
+            messages = await self.state.obtain_message_context(
+                query=None,
+                context_config=self.config.context,
+                truncate=False
+            )
+            for message in messages:
                 logging_tasks.append(self.agent_log.log_message(message))
                     
             logging_tasks.append(self.agent_log.log_output(result))
@@ -78,7 +86,9 @@ def logging_agent_wrapper(func):
                 )
             )
 
-            self.output_messages[end_time] = result
+            result.type = MessageType.OUTPUT
+            # Use state message store
+            await self.state.add_message(result)
             
             await asyncio.gather(*logging_tasks)
             
@@ -104,10 +114,12 @@ def logging_agent_wrapper(func):
                 content = error,
                 sender = Sender.AI,
                 agent_name = self.name,
-                date = end_time
+                date = end_time,
+                type = MessageType.ERROR
             )
             
-            self.error_messages[end_time] = error_message
+            # Use state message store
+            await self.state.add_message(error_message)
             return error_message
         
     return wrapper

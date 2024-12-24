@@ -18,12 +18,19 @@ import asyncio
 from datetime import datetime
 from functools import wraps
 from uuid import uuid4
+import os
+import json
+from pathlib import Path
+import aiofiles
 
-from agents.messages.models import (
+from agents.messages.message import (
     Message, Sender
 )
 
-from agents.models import AgentState, AgentConfig, AgentStatus, Logging
+from agents.config.models import AgentConfig, AgentStatus, Logging
+
+from agents.state.models import AgentState
+
 
 from llm import (
     LLM,
@@ -87,14 +94,6 @@ class Agent(BaseModel):
     :type logging: bool
     :ivar logger: Agent logger instance
     :type logger: Optional[AgentLogger]
-    :ivar input_messages: Input message store
-    :type input_messages: Dict[str, Message]
-    :ivar output_messages: Output message store
-    :type output_messages: Dict[str, Message]
-    :ivar error_messages: Error message store
-    :type error_messages: Dict[str, Message]
-    :ivar messages: Complete message history
-    :type messages: Dict[str, Message]
     :ivar agent_log: Log of agent operations
     :type agent_log: AgentLog
     :ivar runtime_logger: Runtime logger instance
@@ -111,12 +110,6 @@ class Agent(BaseModel):
     state: AgentState = Field(default_factory = AgentState)
     config: AgentConfig = Field(default_factory = AgentConfig)
    
-    # Message stores
-    input_messages: Dict[str, Message] = Field(default_factory = dict)
-    output_messages: Dict[str, Message] = Field(default_factory = dict)
-    error_messages: Dict[str, Message] = Field(default_factory = dict)
-    messages: Dict[str, Message] = Field(default_factory = dict)
-    
     source_agents: List['Agent'] = Field(default_factory = list)
     target_agents: List['Agent'] = Field(default_factory = list)
 
@@ -134,7 +127,7 @@ class Agent(BaseModel):
     
     class Config:
         arbitrary_types_allowed = True
-
+        extra = "forbid"
     
     def __init__(self, *args, **kwargs):
         """
@@ -144,7 +137,6 @@ class Agent(BaseModel):
         :param kwargs: Keyword arguments
         """
         super().__init__(*args, **kwargs)
-
         if self.logging:
             self.agent_log = AgentLog(
                 session_id = self.session_id,
@@ -182,7 +174,7 @@ class Agent(BaseModel):
         message_id: Union[str, Any] = None,
     ) -> Message:
         """
-        Add a message to the agent's message history.
+        Add a message to the agent's message store.
         
         :param message: Message to add
         :type message: Message
@@ -191,10 +183,8 @@ class Agent(BaseModel):
         :return: Added message
         :rtype: Message
         """
-        if message_id is None:
-            message_id = datetime.now()
-        
-        self.messages[message_id] = message
+        # Use state's message store instead of local dict
+        await self.state.add_message(message)
         return message
 
 
@@ -213,12 +203,22 @@ class Agent(BaseModel):
         :return: List of messages
         :rtype: List[Message]
         """
+        # Use state's message store for retrieval
+        filter_dict = {}
+        if ids:
+            filter_dict["id"] = {"$in": ids}
+            
+        messages = await self.state.obtain_message_context(
+            query = None,  # No query needed for direct retrieval
+            context_config = self.config.context,
+            filter = filter_dict,
+            truncate = False
+        )
+        
         if limit:
-            return list(self.messages.items())[:limit]
-        elif ids:
-            return [self.messages[id] for id in ids]
-        else:
-            return list(self.messages.items())
+            messages = messages[:limit]
+            
+        return messages
 
 
     @conditional_logging()
@@ -374,3 +374,63 @@ class Agent(BaseModel):
         :rtype: str
         """
         return f'Agent(state={self.state}, config={self.config}, num_messages={len(self.messages)})'
+
+
+    async def serialize(self, path: Union[str, Path]) -> None:
+        """
+        Serialize agent to disk.
+        
+        :param path: Directory path to save serialized data
+        :type path: Union[str, Path]
+        """
+        path = Path(path)
+        path.mkdir(exist_ok=True)
+        
+        # Save core agent data
+        agent_data = {
+            "name": self.name,
+            "type": self.type,
+            "description": self.description,
+            "session_id": self.session_id,
+            "agent_status": self.agent_status.value,
+            "config": self.config.dict()
+        }
+        
+        async with aiofiles.open(path / "agent.json", "w") as f:
+            await f.write(json.dumps(agent_data))
+            
+        # Serialize state (which includes message store, file store, etc)
+        await self.state.serialize(path / "state")
+
+
+    @classmethod
+    async def deserialize(cls, path: Union[str, Path]) -> 'Agent':
+        """
+        Create Agent instance from serialized data.
+        
+        :param path: Directory path containing serialized data
+        :type path: Union[str, Path]
+        :return: New Agent instance
+        :rtype: Agent
+        """
+        path = Path(path)
+        
+        # Load core agent data
+        async with aiofiles.open(path / "agent.json", "r") as f:
+            agent_data = json.loads(await f.read())
+        
+        # Create base agent instance
+        agent = cls(
+            name=agent_data["name"],
+            type=agent_data["type"],
+            description=agent_data["description"]
+        )
+        
+        agent.session_id = agent_data["session_id"]
+        agent.agent_status = AgentStatus(agent_data["agent_status"])
+        agent.config = AgentConfig(**agent_data["config"])
+        
+        # Load state (which includes message store, file store, etc)
+        await agent.state.deserialize(path / "state")
+        
+        return agent

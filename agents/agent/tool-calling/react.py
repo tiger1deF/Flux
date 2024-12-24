@@ -11,22 +11,15 @@ import inspect
 import logging
 import asyncio
 from datetime import datetime
-from agents.messages.models import Message, Sender, File
-from agents.models import AgentState, AgentConfig
 
-from llm import (
-    LLM,
-    gemini_llm_inference,
-    BaseEmbeddingFunction,
-    base_local_embedder,
-)
+from agents.messages.message import Message, Sender
+from agents.messages.metadata import Metadata
+from agents.messages.file import File
 
-from agents.vectorstore.models import BaseEmbeddingStore  
-from agents.vectorstore.default.store import HNSWStore
+from agents.state.models import AgentState
+from agents.config.models import AgentConfig
 
-from agents.tools.models import Tool, ToolParameter
-from agents.monitor.logger import AgentLogger, AgentLogHandler
-from agents.monitor.agent_logs import AgentLog
+from tools.models import Tool, ToolParameter
 
 from agents.agent.models import Agent
 
@@ -45,7 +38,7 @@ class ReactAgent(Agent):
     
     class Config:
         arbitrary_types_allowed = True
-        
+        extra = "forbid"
        
     async def add_message(
         self, 

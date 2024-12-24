@@ -4,8 +4,6 @@ from typing import Union, List
 import aiohttp
 import asyncio
 
-from llm.models import BaseEmbeddingFunction
-
 
 async def pulse_embeddings(text: Union[str, list[str]]):
     """
@@ -44,16 +42,17 @@ async def pulse_fetch_embedding(session, url: str, payload: dict, headers: dict)
     """
     Fetch an embedding from Pulse API.
     
-    :param session: Aiohttp ClientSession
+    :param session: Aiohttp ClientSession for making requests
     :type session: aiohttp.ClientSession
     :param url: API endpoint URL
     :type url: str
-    :param payload: Request payload
+    :param payload: Request payload data
     :type payload: dict
     :param headers: Request headers
     :type headers: dict
     :return: Embedding vector
-    :rtype: np.array
+    :rtype: List[float]
+    :raises RuntimeError: If API request fails
     """
     async with session.post(
         url, 
@@ -115,7 +114,4 @@ async def pulse_batch_embeddings(text: List[str], max_concurrent_requests: int =
         all_embeddings.extend(embeddings)
     
     return all_embeddings
-
-
-base_pulse_embedder = BaseEmbeddingFunction(pulse_batch_embeddings)
 

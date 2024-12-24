@@ -1,8 +1,8 @@
 Embeddings
 =========
 
-.. module:: llm.embeddings
-   :synopsis: Embedding model implementations.
+.. module:: llm.models
+   :synopsis: Base embedding model implementations.
 
 Overview
 --------
@@ -11,7 +11,7 @@ with support for both synchronous and asynchronous operations. Each implementati
 is thread-safe and handles proper resource management.
 
 Base Embedding Function
---------------------
+---------------------
 .. autoclass:: llm.models.BaseEmbeddingFunction
    :members:
    :undoc-members:
@@ -19,10 +19,10 @@ Base Embedding Function
    :special-members: __init__, __call__
 
 Provider Implementations
----------------------
+----------------------
 
 Pulse Embeddings
-~~~~~~~~~~~~~~
+---------------
 .. automodule:: llm.embeddings.pulse
    :members:
    :undoc-members:
@@ -30,14 +30,14 @@ Pulse Embeddings
    :exclude-members: pulse_fetch_embedding
 
 Gemini Embeddings
-~~~~~~~~~~~~~~
+---------------
 .. automodule:: llm.embeddings.gemini
    :members:
    :undoc-members:
    :show-inheritance:
 
 Local Embeddings
-~~~~~~~~~~~~~
+--------------
 .. automodule:: llm.embeddings.local
    :members:
    :undoc-members:

@@ -3,12 +3,17 @@ msgpack
 orjson>=3.9.10
 zstandard
 pyarrow
-pandas
+polars>=0.20.6
 numpy
+xmltodict
 
 #LLM + vector
 google-generativeai
 hnswlib
+torch
+transformers
+sentence-transformers[torch]>=2.5.0 
+
 
 # visualization
 plotly
@@ -21,14 +26,9 @@ aiohttp
 diff-match-patch 
 patience
 
-
-# OPTIONAL - for now
-plotly
-sentence-transformers[torch]>=2.5.0 
-
-# TODO - remove
+# Monitering
 langfuse
 
-# Added from the code block
-torch
-transformers
+# Files
+pyyaml>=6.0.1
+xmltodict>=0.13.0

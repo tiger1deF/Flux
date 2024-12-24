@@ -6,10 +6,10 @@ tracking, state management, and error handling without additional logging.
 """
 
 from datetime import datetime   
-import asyncio
 
-from agents.models import AgentStatus
-from agents.messages.models import Message, Sender
+
+from agents.config.models import AgentStatus
+from agents.messages.message import Message, Sender, MessageType
 
 
 def default_agent_wrapper(func):
@@ -41,12 +41,13 @@ def default_agent_wrapper(func):
             input_message = args[0]
             
         if input_message:
-            self.input_messages[start_time] = input_message
+            input_message.type = MessageType.INPUT
+            # Use state message store instead of messages dict
+            await self.state.add_message(input_message)
         else:
             raise ValueError("Input Message class is required for agent!")
                 
-        state = kwargs.get('state')
-        if state:
+        if state := kwargs.get('state'):
             self.state = state
                 
         try:
@@ -59,7 +60,9 @@ def default_agent_wrapper(func):
             if not isinstance(result, Message):
                raise ValueError("Output Message class is required for agent!")
            
-            self.output_messages[end_time] = result
+            result.type = MessageType.INTERMEDIATE
+            # Use state message store
+            await self.state.add_message(result)
             self.agent_status = AgentStatus.COMPLETED
                 
             return result
@@ -74,9 +77,11 @@ def default_agent_wrapper(func):
                 content = error,
                 sender = Sender.AI,
                 agent_name = self.name,
-                date = end_time
+                date = end_time,
+                type = MessageType.ERROR
             )
-            self.error_messages[end_time] = error_message
+            # Use state message store
+            await self.state.add_message(error_message)
             
             return error_message
         

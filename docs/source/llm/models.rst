@@ -1,7 +1,7 @@
 Language Models
 ===============
 
-.. module:: llm
+.. module:: llm.models
    :synopsis: Language model implementations and interfaces.
 
 Overview

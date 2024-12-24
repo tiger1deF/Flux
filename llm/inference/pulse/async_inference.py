@@ -6,7 +6,6 @@ including model listing and inference operations with support for various extern
 """
 
 import aiohttp
-import asyncio
 import json
 import os
 from typing import Optional, List
@@ -31,7 +30,12 @@ external_models = {
     'claude-3-opus-20240620': 'anthropic',
     'claude-3-sonnet-20240229': 'anthropic'
 }
-"""Mapping of external model names to their API providers"""
+"""
+Mapping of external model names to their API providers.
+
+:ivar external_models: Dictionary mapping model names to their provider services
+:type external_models: Dict[str, str]
+"""
 
 
 # Cache for internal models
@@ -83,7 +87,7 @@ async def _get_internal_model_list() -> List[str]:
 
 async def pulse_llm_inference(
     query: str,
-    model_name: str = "gpt-4o",
+    model_name: str = "Mixtral-8x22B-Instruct-v0.1",
     temperature: float = 0.1,
     max_tokens: int = 4_000,
     top_p: float = 0.9,
@@ -117,16 +121,14 @@ async def pulse_llm_inference(
         "prompt": f'{system_prompt}\n\n{query}' if system_prompt else query,
         "top_p": str(top_p)
     }
-    
+
     if model_name not in internal_models:
         external = True
         try:
             api_type = external_models[model_name]
             payload['api_type'] = api_type
-            
-            if api_type == 'gemini':
-                payload['api_key'] = os.getenv('GEMINI_API_KEY')
-            elif api_type == 'azure-openai':
+        
+            if api_type == 'azure-openai':
                 payload['api_key'] = os.getenv('OPENAI_AZURE_API_KEY')
             elif api_type == 'anthropic':
                 payload['api_key'] = os.getenv('ANTHROPIC_API_KEY')
@@ -142,12 +144,12 @@ async def pulse_llm_inference(
     form_data.add_field('data', payload_str, content_type='application/json')
     
     headers = {'Authorization': f'Apikey {os.getenv("PULSE_API_KEY")}'}
-    
+
     async with aiohttp.ClientSession() as session:
         async with session.post(
             f"{os.getenv('INFERENCE_URL')}/pulse/v4/pf/lp/llm/send",
-            headers=headers,
-            data=form_data
+            headers = headers,
+            data = form_data
         ) as response:
             try:
                 if external:

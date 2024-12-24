@@ -2,7 +2,7 @@
 Serialization utilities for handling various data types and formats.
 
 This module provides functionality for serializing and deserializing different data types
-including pandas DataFrames, numpy arrays, Plotly figures, PIL Images, and more. It supports
+including polars DataFrames, numpy arrays, Plotly figures, PIL Images, and more. It supports
 both synchronous and asynchronous operations with thread and process pool executors.
 """
 
@@ -16,7 +16,6 @@ import pickle
 import logging
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 import numpy as np
-import pandas as pd
 import pyarrow as pa
 import plotly.graph_objects as go
 import zstandard as zstd 
@@ -26,8 +25,9 @@ import os
 import threading
 import asyncio
 import contextlib
+import polars as pl
 
-
+# TODO - Centralize, remove elsewhere
 logger = logging.getLogger(__name__)
 
 # Thread-safe compressor instances
@@ -68,7 +68,7 @@ class SerializationType(Enum):
     """
     Enumeration of supported serialization types.
     
-    :cvar ARROW: Apache Arrow serialization for pandas DataFrames
+    :cvar ARROW: Apache Arrow serialization for polars DataFrames
     :cvar PLOTLY: Plotly figure serialization
     :cvar MSGPACK: MessagePack serialization for basic Python types
     :cvar PICKLE: Python pickle serialization (fallback)
@@ -90,10 +90,15 @@ class SerializationType(Enum):
 
 
 JSON_COMPATIBLE_TYPES = frozenset([type(None), bool, int, float, str])
-"""Set of types that are JSON-compatible and don't need serialization"""
+"""
+Set of types that are JSON-compatible and don't need serialization.
+
+:ivar JSON_COMPATIBLE_TYPES: Set of Python types that can be directly serialized to JSON
+:type JSON_COMPATIBLE_TYPES: frozenset
+"""
 
 TYPE_SERIALIZATION_MAP = {
-    pd.DataFrame: SerializationType.ARROW,
+    pl.DataFrame: SerializationType.ARROW,
     go.Figure: SerializationType.PLOTLY,
     dict: SerializationType.MSGPACK,
     list: SerializationType.MSGPACK,
@@ -104,7 +109,12 @@ TYPE_SERIALIZATION_MAP = {
     set: SerializationType.JSON,
     frozenset: SerializationType.JSON
 }
-"""Mapping of Python types to their corresponding serialization methods"""
+"""
+Mapping of Python types to their corresponding serialization methods.
+
+:ivar TYPE_SERIALIZATION_MAP: Dictionary mapping Python types to SerializationType enums
+:type TYPE_SERIALIZATION_MAP: Dict[Type, SerializationType]
+"""
 
 
 # Thread-local storage for executors
@@ -283,11 +293,7 @@ async def _serialize_item(item: Any) -> Any:
         if ser_type == SerializationType.ARROW:
             if len(item) < 10000:
                 def serialize_arrow():
-                    table = pa.Table.from_pandas(item)
-                    sink = pa.BufferOutputStream()
-                    with pa.ipc.new_stream(sink, table.schema) as writer:
-                        writer.write_table(table)
-                    return sink.getvalue().to_pybytes()
+                    return item.to_arrow().serialize().to_pybytes()
                 
                 arrow_bytes = await loop.run_in_executor(
                     manager.get_thread_pool(),
@@ -296,7 +302,7 @@ async def _serialize_item(item: Any) -> Any:
             else:
                 def serialize_parquet():
                     buffer = io.BytesIO()
-                    item.to_parquet(buffer, compression='zstd', index=True)
+                    item.write_parquet(buffer, compression="zstd")
                     return buffer.getvalue()
                 
                 arrow_bytes = await loop.run_in_executor(
@@ -448,9 +454,9 @@ async def _unserialize_item(item: Any) -> Any:
         if item['type'] == 'arrow':
             def unserialize_arrow():
                 if len(binary_data) < 1_000_000:
-                    return pa.ipc.open_stream(binary_data).read_all().to_pandas()
+                    return pl.from_arrow(pa.ipc.read_message(binary_data).body)
                 else:
-                    return pd.read_parquet(io.BytesIO(binary_data))
+                    return pl.read_parquet(io.BytesIO(binary_data))
             
             return await loop.run_in_executor(
                 manager.get_thread_pool(),
@@ -565,3 +571,213 @@ async def serialization_context():
         yield
     finally:
         manager.cleanup()
+
+
+async def _deserialize_item(serialized_data: Dict[str, Any]) -> Any:
+    """
+    Deserialize a single item based on its type tag.
+    
+    :param serialized_data: Dictionary containing type and serialized data
+    :type serialized_data: Dict[str, Any]
+    :return: Deserialized object
+    :rtype: Any
+    :raises ValueError: If deserialization fails
+    """
+    if not isinstance(serialized_data, dict) or 'type' not in serialized_data or 'data' not in serialized_data:
+        return serialized_data
+            
+    try:
+        binary_data = base64.b64decode(serialized_data['data'])
+        loop = asyncio.get_running_loop()
+        
+        if serialized_data['type'] == 'arrow':
+            def deserialize_arrow():
+                if len(binary_data) < 1_000_000:
+                    # For smaller datasets, use Arrow IPC
+                    table = pa.ipc.read_message(binary_data).body
+                    return pl.from_arrow(table)
+                else:
+                    # For larger datasets, use Parquet
+                    buffer = io.BytesIO(binary_data)
+                    return pl.read_parquet(buffer)
+            
+            return await loop.run_in_executor(
+                None,
+                deserialize_arrow
+            )
+            
+        elif serialized_data['type'] == 'plotly':
+            def deserialize_plotly():
+                decompressed = get_decompressor().decompress(binary_data)
+                fig_dict = orjson.loads(decompressed)
+                return go.Figure(fig_dict)
+            
+            return await loop.run_in_executor(
+                None,
+                deserialize_plotly
+            )
+            
+        elif serialized_data['type'] == 'numpy':
+            def deserialize_numpy():
+                buffer = io.BytesIO(binary_data)
+                return np.load(buffer, allow_pickle=False)
+            
+            return await loop.run_in_executor(
+                None,
+                deserialize_numpy
+            )
+            
+        elif serialized_data['type'] == 'image':
+            def deserialize_image():
+                buffer = io.BytesIO(binary_data)
+                return Image.open(buffer)
+            
+            return await loop.run_in_executor(
+                None,
+                deserialize_image
+            )
+            
+        elif serialized_data['type'] == 'msgpack':
+            def deserialize_msgpack():
+                decompressed = get_decompressor().decompress(binary_data)
+                return msgpack.unpackb(decompressed, raw=False)
+            
+            return await loop.run_in_executor(
+                None,
+                deserialize_msgpack
+            )
+            
+        elif serialized_data['type'] == 'pickle':
+            def deserialize_pickle():
+                decompressed = get_decompressor().decompress(binary_data)
+                return pickle.loads(decompressed)
+            
+            return await loop.run_in_executor(
+                None,
+                deserialize_pickle
+            )
+            
+        else:
+            raise ValueError(f"Unknown serialization type: {serialized_data['type']}")
+            
+    except Exception as e:
+        raise ValueError(f"Failed to deserialize {serialized_data['type']} data: {str(e)}")
+
+
+async def deserialize_metadata(serialized_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Deserialize metadata dictionary containing various data types.
+    
+    :param serialized_data: Dictionary containing serialized metadata
+    :type serialized_data: Dict[str, Any]
+    :return: Dictionary containing deserialized data
+    :rtype: Dict[str, Any]
+    """
+    try:
+        items_to_process = [
+            (key, value) for key, value in serialized_data.items()
+            if isinstance(value, dict) and 'type' in value and 'data' in value
+        ]
+        
+        if items_to_process:
+            results = await asyncio.gather(*[
+                _deserialize_item(value) for _, value in items_to_process
+            ])
+            
+            return {
+                key: result if result is not None else value
+                for (key, value), result in zip(items_to_process, results)
+            }
+            
+        return serialized_data
+                    
+    except Exception as e:
+        logger.error(f"Failed to deserialize items: {str(e)}")
+        return {}
+
+
+@contextlib.asynccontextmanager
+async def serialization_context():
+    """
+    Context manager for managing serialization resources.
+    
+    Ensures proper cleanup of executor pools after serialization operations.
+    
+    :yield: None
+    :rtype: None
+    """
+    manager = ExecutorManager.get_instance()
+    try:
+        yield
+    finally:
+        manager.cleanup()
+
+
+async def serialize_and_compress(data: Any) -> bytes:
+    """
+    Serialize and compress data in a format-aware way.
+    
+    :param data: Data to serialize and compress
+    :type data: Any
+    :return: Compressed serialized data
+    :rtype: bytes
+    """
+    loop = asyncio.get_running_loop()
+    
+    if isinstance(data, pl.DataFrame):
+        return await loop.run_in_executor(None,
+            lambda: data.to_arrow().serialize().to_pybytes()
+        )
+    elif isinstance(data, np.ndarray):
+        buffer = io.BytesIO()
+        await loop.run_in_executor(None,
+            lambda: np.save(buffer, data, allow_pickle=False)
+        )
+        return buffer.getvalue()
+    else:
+        # Default to msgpack for other types
+        return await loop.run_in_executor(None,
+            lambda: get_compressor().compress(
+                msgpack.packb(data, use_bin_type=True)
+            )
+        )
+
+
+async def decompress_and_deserialize(data: bytes, expected_type: Type = None) -> Any:
+    """
+    Decompress and deserialize data with type checking.
+    
+    :param data: Compressed serialized data
+    :type data: bytes
+    :param expected_type: Expected type of deserialized data
+    :type expected_type: Type, optional
+    :return: Deserialized data
+    :rtype: Any
+    :raises TypeError: If deserialized data doesn't match expected type
+    """
+    loop = asyncio.get_running_loop()
+    
+    if expected_type == pl.DataFrame:
+        df = await loop.run_in_executor(None,
+            lambda: pl.from_arrow(pa.ipc.read_message(data).body)
+        )
+        return df
+    elif expected_type == np.ndarray:
+        buffer = io.BytesIO(data)
+        arr = await loop.run_in_executor(None,
+            lambda: np.load(buffer, allow_pickle=False)
+        )
+        return arr
+    else:
+        # Default msgpack deserialization
+        decompressed = await loop.run_in_executor(None,
+            lambda: get_decompressor().decompress(data)
+        )
+        result = await loop.run_in_executor(None,
+            lambda: msgpack.unpackb(decompressed, raw=False)
+        )
+        
+        if expected_type and not isinstance(result, expected_type):
+            raise TypeError(f"Expected {expected_type}, got {type(result)}")
+            
+        return result

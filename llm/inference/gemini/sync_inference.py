@@ -11,7 +11,12 @@ import threading
 
 
 _model_lock = threading.Lock()
-"""Lock for thread-safe model initialization"""
+"""
+Lock for thread-safe model initialization.
+
+:ivar _model_lock: Threading lock for synchronizing model initialization
+:type _model_lock: threading.Lock
+"""
 
 
 @lru_cache(maxsize = 32)

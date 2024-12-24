@@ -42,6 +42,15 @@ class ToolParameter(BaseModel):
         """
         return f"ToolParameter(name={self.name}, type={self.type}, required={self.required}, default={self.default}, description={self.description})"
     
+    class Config:
+        """
+        Configuration for the ToolParameter model.
+        
+        :cvar arbitrary_types_allowed: Allow arbitrary types in the model
+        :type arbitrary_types_allowed: bool
+        """
+        arbitrary_types_allowed = True
+        extra = "forbid"
 
 class Tool(BaseModel):
     """
@@ -76,8 +85,15 @@ class Tool(BaseModel):
     _is_async: bool = False
     
     class Config:
+        """
+        Configuration for the Tool model.
+        
+        :cvar arbitrary_types_allowed: Allow arbitrary types in the model
+        :type arbitrary_types_allowed: bool
+        """
         arbitrary_types_allowed = True
-
+        extra = "forbid"
+        
     def __init__(self, **data):
         """
         Initialize tool and detect if function is async.

@@ -8,9 +8,10 @@ from .inference.pulse.async_inference import pulse_llm_inference as pulse_llm_as
 
 from .models import BaseEmbeddingFunction
 
-from .embeddings.pulse import pulse_embeddings, base_pulse_embedder
+from .embeddings.pulse import pulse_embeddings
 from .embeddings.gemini import gemini_generate_embedding, base_gemini_embedder
 from .embeddings.local import local_generate_embedding, base_local_embedder
+
 
 __all__ = [
     'LLM',
@@ -23,7 +24,7 @@ __all__ = [
     'pulse_embeddings',
     'gemini_generate_embedding',
     'local_generate_embedding',
-    'base_pulse_embedder',
+    
     'base_gemini_embedder',
     'base_local_embedder',
 ]

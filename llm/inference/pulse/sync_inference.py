@@ -28,7 +28,12 @@ external_models = {
     'claude-3-opus-20240620': 'anthropic',
     'claude-3-sonnet-20240229': 'anthropic'
 }
-"""Mapping of external model names to their API providers"""
+"""
+Mapping of external model names to their API providers.
+
+:ivar external_models: Dictionary mapping model names to their provider services
+:type external_models: Dict[str, str]
+"""
 
 
 @lru_cache(maxsize = 1)

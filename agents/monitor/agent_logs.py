@@ -9,7 +9,7 @@ and various data type handling.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-import pandas as pd
+import polars as pl
 import plotly.graph_objects as go
 from typing import Any, Dict, Union, Callable, Mapping, Sequence, List
 from functools import lru_cache
@@ -23,7 +23,8 @@ from llm import LLM
 
 from agents.agent.models import Sender
 
-from agents.messages.models import File, Message
+from agents.messages.message import Message
+from agents.messages.file import File
 
     
 def get_type_handler(obj: Any) -> str:
@@ -35,7 +36,7 @@ def get_type_handler(obj: Any) -> str:
     :return: String identifier for the handler type
     :rtype: str
     """
-    if isinstance(obj, pd.DataFrame):
+    if isinstance(obj, pl.DataFrame):
         return "dataframe"
     elif isinstance(obj, go.Figure):
         return "figure"
@@ -74,26 +75,26 @@ def get_size_str(size_bytes: int) -> str:
     return f"{size_bytes:.1f} TB"
 
 
-def handle_dataframe(df: pd.DataFrame, name: str) -> str:
+def handle_dataframe(df: pl.DataFrame, name: str) -> str:
     """
-    Generate markdown summary for a pandas DataFrame.
+    Generate markdown summary for a polars DataFrame.
     
     :param df: DataFrame to summarize
-    :type df: pd.DataFrame
+    :type df: pl.DataFrame
     :param name: Name of the DataFrame
     :type name: str
     :return: Markdown formatted summary
     :rtype: str
     """
-    size = get_size_str(df.memory_usage().sum())
+    size = get_size_str(df.estimated_size())
     return (f"## 📋 **{name}**\n\n"
             f"### DataFrame Metadata\n"
-            f"- **Shape**: {df.shape[0]} rows × {df.shape[1]} columns\n"
+            f"- **Shape**: {df.height} rows × {df.width} columns\n"
             f"- **Memory Usage**: {size}\n"
             f"- **Column Types**:\n"
-            + "".join(f"  - `{col}`: {dtype}\n" for col, dtype in df.dtypes.items())
+            + "".join(f"  - `{col}`: {dtype}\n" for col, dtype in zip(df.columns, df.dtypes))
             + "\n### Data Preview\n\n"
-            + df.head(5).to_markdown(index=False, tablefmt="pipe")
+            + df.head(5).to_markdown()
             + "\n\n---\n\n")
 
 

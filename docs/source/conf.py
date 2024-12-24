@@ -3,9 +3,9 @@ import sys
 sys.path.insert(0, os.path.abspath('../..'))
 
 project = 'Flux'
-copyright = '2024, Christian de Frondeville, Arijit Nukala, Gubi Ganguly'
-author = 'Christian de Frondeville, Arijit Nukala, Gubi Ganguly'
-release = '0.1'
+copyright = '2024, Christian de Frondeville'
+author = 'Christian de Frondeville'
+release = '0.2'
 
 extensions = [
     'sphinx.ext.autodoc',

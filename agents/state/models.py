@@ -1,13 +1,12 @@
 """
-Core agent models and state management.
+State management models for agents.
 
-This module provides the base models for agent configuration, state management,
-and file handling with support for both synchronous and asynchronous operations.
+This module provides state management functionality including message history,
+context storage, file management, and metadata handling.
 """
-
-from typing import List, Dict, Any, Optional, Callable, Union, Tuple, ClassVar
+import os
+from typing import Dict, Any, List, Tuple, ClassVar, Optional, Callable, Union
 import tempfile
-from enum import Enum
 from pathlib import Path
 from pydantic import BaseModel, Field
 import json
@@ -16,74 +15,27 @@ import asyncio
 from contextlib import asynccontextmanager
 import datetime
 from difflib import SequenceMatcher, unified_diff
-import pandas as pd
+import polars as pl
 import numpy as np
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial, cached_property
 import multiprocessing
-import contextlib
 from uuid import uuid4
 
-from agents.messages.models import Message, File
+# Import message and file types
+from agents.messages.message import Message, MessageType
+from agents.messages.metadata import Metadata
+from agents.messages.file import File
+
+from agents.vectorstore.default.store import HNSWStore
+
+from agents.config.models import ContextConfig, RetrievalType
+
+from agents.vectorstore.truncation import truncate_items
 
 
-class AgentStatus(Enum):
-    """
-    Enumeration of possible agent execution states.
-    
-    :cvar IDLE: Agent is waiting for work
-    :cvar RUNNING: Agent is currently executing
-    :cvar COMPLETED: Agent has finished successfully
-    :cvar FAILED: Agent encountered an error
-    :cvar CANCELLED: Agent execution was cancelled
-    """
-    IDLE = "idle"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
-class Logging(Enum):
-    """
-    Enumeration of logging modes for agents.
-    
-    :cvar LANGFUSE: Use Langfuse for logging
-    :cvar ENABLED: Use basic logging
-    :cvar DISABLED: Disable logging
-    """
-    LANGFUSE = "langfuse"
-    ENABLED = "enabled"
-    DISABLED = "disabled"
-
-
-class AgentConfig(BaseModel):
-    """
-    Configuration model for agents.
-    
-    :ivar task_prompt: Main task prompt for the agent
-    :type task_prompt: Optional[str]
-    :ivar prompts: Dictionary of named prompts
-    :type prompts: Dict[str, str]
-    :ivar attributes: Additional configuration attributes
-    :type attributes: Dict[str, Any]
-    :ivar description: Agent description
-    :type description: Optional[str]
-    :ivar logging: Logging mode
-    :type logging: Logging
-    """
-    task_prompt: Optional[str] = None
-    prompts: Dict[str, str] = Field(default_factory = dict)
-    attributes: Dict[str, Any] = Field(default_factory = dict)
-    description: Optional[str] = None
-    logging: Logging = Logging.LANGFUSE
-    
-    def __repr__(self):
-        return f"AgentConfig(system_prompt={self.system_prompt}, prompts={self.prompts}, attributes={self.attributes})"
-
-    
 class AgentState(BaseModel):
     """
     State management model for agents.
@@ -108,12 +60,27 @@ class AgentState(BaseModel):
     """
     _metadata_lock: ClassVar[threading.RLock] = threading.RLock()
     
-    # Context stores
-    context: Dict[str, Any] = Field(default_factory = dict)
-    files: Dict[str, File] = Field(default_factory = dict)
-    metadata: Dict[str, Any] = Field(default_factory = dict)
-    temp_dir: Optional[str] = Field(default = None, exclude = True)
     session_id: str = Field(default = str(uuid4()), exclude = True)
+    temp_dir: Optional[str] = Field(default = None, exclude = True)
+   
+    # Context stores
+    message_store: HNSWStore = Field(
+        default_factory = lambda: HNSWStore(),
+        description = "Store for message history and retrieval"
+    )
+    file_store: HNSWStore = Field(
+        default_factory = lambda: HNSWStore(),
+        description = "Store for files"
+    )
+    metadata_store: HNSWStore = Field(
+        default_factory = lambda: HNSWStore(),
+        description = "Store for metadata"
+    )
+    context: Dict[str, Any] = Field(
+        default_factory = dict,
+        description = "Runtime context storage"
+    )
+    
     
     @cached_property 
     def _executor(self) -> ThreadPoolExecutor:
@@ -130,8 +97,8 @@ class AgentState(BaseModel):
             thread_count = multiprocessing.cpu_count()
             
         return ThreadPoolExecutor(
-            max_workers=thread_count,
-            thread_name_prefix='agent_metadata_'
+            max_workers = thread_count,
+            thread_name_prefix = 'agent_metadata_'
         )
     
     async def _run_in_executor(self, func, *args):
@@ -158,7 +125,7 @@ class AgentState(BaseModel):
         :rtype: Path
         """
         if self.temp_dir is None:
-            self.temp_dir = tempfile.mkdtemp(prefix = f"agent_workspace_{self.metadata.name}_")
+            self.temp_dir = tempfile.mkdtemp(prefix = f"agent_workspace_{self.session_id}_{uuid4()}_")
         return Path(self.temp_dir)
     
     async def cleanup(self):
@@ -190,7 +157,7 @@ class AgentState(BaseModel):
         content: str = "",
         annotations: Dict[str, Any] = {},
         description: str = ""
-    ) -> File:
+    ):
         """
         Create a new file in the agent's workspace.
         
@@ -221,10 +188,8 @@ class AgentState(BaseModel):
             description = description,
             annotations = annotations
         )
-        self.files[filename] = file
+        await self.add_file(file)
         
-        return file
-    
     
     async def read_file(self, filename: str) -> str:
         """
@@ -239,38 +204,221 @@ class AgentState(BaseModel):
         async with aiofiles.open(file_path, 'r') as f:
             return await f.read()
     
-    
-    ######################
-    # Context Management # 
-    ######################
-    
-    def obtain_context(self, key: str = None) -> Any:
-        """
-        Get value(s) from the context store.
-        
-        :param key: Optional key to retrieve specific value
-        :type key: str, optional
-        :return: Context value or formatted string of all context
-        :rtype: Any
-        """
-        if key is None:
-            context_str = ""
-            for key, value in self.context.items():
-                context_str += f"{key}: {value}\n"
-            return context_str
-        
-        else:
-            return self.context.get(key, None)
-    
-    
-    def update_context(self, **kwargs) -> None:
-        """
-        Update context store with new key-value pairs.
-        
-        :param kwargs: Key-value pairs to update
-        """
-        self.context.update(kwargs)
 
+    async def add_message(
+        self,
+        messages: Union[Message, List[Message]]
+    ) -> None:
+        """
+        Add message(s) to the message store.
+        
+        :param messages: Single message or list of messages to add
+        :type messages: Union[Message, List[Message]]
+        """
+        if not isinstance(messages, list):
+            messages = [messages]
+        for message in messages:
+            await self.message_store.add(
+                metadata = message,
+                text = message.content
+            )
+
+
+    async def add_file(
+        self,
+        files: Union[File, List[File]]
+    ) -> None:
+        """
+        Add file(s) to the file store.
+        
+        :param files: Single file or list of files to add
+        :type files: Union[File, List[File]]
+        """
+        if not isinstance(files, list):
+            files = [files]
+    
+        for file in files:
+            await self.file_store.add(
+                metadata = file,
+                text = file.content
+            )
+
+
+    async def add_metadata(
+        self,
+        metadata: Union[Metadata, List[Metadata]]
+    ) -> None:
+        """
+        Add metadata item(s) to the metadata store.
+        
+        :param metadata: Single metadata item or list of items to add
+        :type metadata: Union[Metadata, List[Metadata]]
+        """
+        if not isinstance(metadata, list):
+            metadata = [metadata]
+        for meta in metadata:
+            await self.metadata_store.add(
+                metadata = meta,
+                text = await meta.content
+            )
+
+
+    async def obtain_message_context(
+        self,
+        query: Message,
+        context_config: ContextConfig,
+        filter: Optional[Dict[str, Any]] = None,
+        truncate: bool = True
+    ) -> List[Message]:
+        """
+        Obtain message context from message store.
+        
+        :param query: Query message
+        :type query: Message
+        :param context_config: Context configuration
+        :type context_config: ContextConfig
+        :param filter: Optional filter criteria
+        :type filter: Optional[Dict[str, Any]]
+        :param truncate: Whether to truncate results
+        :type truncate: bool
+        :return: List of relevant messages
+        :rtype: List[Message]
+        """
+        return await self._obtain_context(
+            query = query,
+            store = self.message_store,
+            context_config = context_config,
+            filter = filter,
+            truncate = truncate
+        )
+
+
+    async def obtain_file_context(
+        self,
+        query: File,
+        context_config: ContextConfig,
+        filter: Optional[Dict[str, Any]] = None,
+        truncate: bool = True
+    ) -> List[File]:
+        """
+        Obtain file context from file store.
+        
+        :param query: Query file
+        :type query: File 
+        :param context_config: Context configuration
+        :type context_config: ContextConfig
+        :param filter: Optional filter criteria
+        :type filter: Optional[Dict[str, Any]]
+        :param truncate: Whether to truncate results
+        :type truncate: bool
+        :return: List of relevant files
+        :rtype: List[File]
+        """
+        return await self._obtain_context(
+            query = query,
+            store = self.file_store,
+            context_config = context_config,
+            filter = filter,
+            truncate = truncate
+        )
+
+
+    async def obtain_metadata_context(
+        self,
+        query: Metadata,
+        context_config: ContextConfig,
+        filter: Optional[Dict[str, Any]] = None,
+        truncate: bool = True
+    ) -> List[Metadata]:
+        """
+        Obtain metadata context from metadata store.
+        
+        :param query: Query metadata
+        :type query: Metadata
+        :param context_config: Context configuration
+        :type context_config: ContextConfig
+        :param filter: Optional filter criteria
+        :type filter: Optional[Dict[str, Any]]
+        :param truncate: Whether to truncate results
+        :type truncate: bool
+        :return: List of relevant metadata items
+        :rtype: List[Metadata]
+        """
+        return await self._obtain_context(
+            query = query,
+            store = self.metadata_store,
+            context_config = context_config,
+            filter = filter,
+            truncate = truncate
+        )
+
+
+    async def _obtain_context(
+        self,
+        query: Union[Message, File, Metadata],
+        store: Any,
+        context_config: ContextConfig,
+        filter: Optional[Dict[str, Any]] = None,
+        truncate: bool = True
+    ) -> List[Any]:
+        """
+        Internal method to obtain context from a store.
+        
+        :param query: Query item
+        :param store: Store to search in
+        :param context_config: Context configuration
+        :param filter: Optional filter criteria
+        :param truncate: Whether to truncate results
+        :return: List of relevant items
+        """
+        if context_config.strategy == RetrievalType.DISABLED:
+            return []
+        
+        elif context_config.strategy == RetrievalType.RELEVANT:
+            retrieved_items = store.search_relevant(
+                query,
+                filter = filter,
+                k = context_config.item_count
+            )
+            if truncate:
+                retrieved_items = await truncate_items(
+                    items = retrieved_items,
+                    context_config = context_config
+                )
+           
+        elif context_config.strategy == RetrievalType.HISTORY:
+            retrieved_items = store.search_history(
+                query,
+                filter = filter,
+                k = context_config.item_count
+            )
+            if truncate:
+                retrieved_items = await truncate_items(
+                    items = retrieved_items,
+                    context_config = context_config
+                )
+
+        elif context_config.strategy == RetrievalType.ALL:
+            relevant_items = store.search_relevant(
+                query,
+                filter = filter,
+                k = context_config.item_count // 2
+            )
+            history_items = store.search_history(
+                query,
+                filter = filter,
+                k = context_config.item_count // 2
+            )
+            if truncate:
+                retrieved_items = await truncate_items(
+                    items = relevant_items + history_items,
+                    context_config = context_config
+                )
+        else:
+            raise ValueError(f"Invalid retrieval strategy: {context_config.strategy}")
+      
+        return retrieved_items
+    
     
     def flush_context(self, **kwargs) -> None:
         """
@@ -502,7 +650,7 @@ class AgentState(BaseModel):
     # Metadata Management # 
     #######################
     
-    @contextlib.asynccontextmanager
+    @asynccontextmanager
     async def access_metadata(self, key: str = None) -> Any:
         """
         Thread-safe access to metadata store.
@@ -585,10 +733,10 @@ class AgentState(BaseModel):
         :return: Tuple of key and merged value
         :rtype: Tuple[str, Any]
         """
-        if isinstance(value, pd.DataFrame) and isinstance(existing, pd.DataFrame):
+        if isinstance(value, pl.DataFrame) and isinstance(existing, pl.DataFrame):
             if set(value.columns) == set(existing.columns):
                 merged_df = await self._run_in_executor(
-                    pd.concat, [existing, value], 
+                    lambda: pl.concat([existing, value], how="vertical"),
                     ignore_index=True
                 )
                 return key, merged_df
@@ -735,7 +883,7 @@ class AgentState(BaseModel):
             metadata.update(dict(zip(metadata.keys(), results)))
 
 
-    @contextlib.asynccontextmanager 
+    @asynccontextmanager 
     async def _async_lock(self):
         """
         Context manager for thread-safe metadata access.
@@ -773,3 +921,159 @@ class AgentState(BaseModel):
         }
 
 
+    async def write_files_to_temp(self) -> Dict[str, Path]:
+        """
+        Asynchronously write all files from messages to temporary directory.
+        Preserves original paths and creates necessary subdirectories.
+        
+        :return: Dictionary mapping file IDs to their written paths
+        :rtype: Dict[str, Path]
+        """
+        async def write_single_file(file_id: str, file: File) -> Tuple[str, Path]:
+            if not file.path:
+                return file_id, None
+            
+            # Create full path in temp directory
+            rel_path = Path(file.path).relative_to(file.path.anchor)
+            temp_path = self.temp_directory / rel_path
+            
+            # Create parent directories
+            os.makedirs(temp_path.parent, exist_ok=True)
+            
+            # Write file content
+            if isinstance(file.content, bytes):
+                async with aiofiles.open(temp_path, 'wb') as f:
+                    await f.write(file.content)
+            else:
+                async with aiofiles.open(temp_path, 'w') as f:
+                    await f.write(str(file.content))
+                
+            return file_id, temp_path
+
+        # Gather all files from messages
+        file_tasks = []
+        for file_id, file in self.files.items():
+            if file.path:  # Only process files with paths
+                file_tasks.append(write_single_file(file_id, file))
+            
+        # Execute all file writes in parallel
+        results = await asyncio.gather(*file_tasks, return_exceptions=True)
+        
+        # Filter out failed writes and create result dictionary
+        written_files = {
+            file_id: path 
+            for file_id, path in results 
+            if isinstance(path, Path)
+        }
+        
+        return written_files
+
+
+    async def serialize(self, path: Union[str, Path]) -> None:
+        """
+        Serialize agent state to disk.
+        
+        :param path: Directory path to save serialized data
+        :type path: Union[str, Path]
+        """
+        path = Path(path)
+        os.makedirs(path, exist_ok=True)
+        
+        # Serialize stores concurrently
+        async def save_messages_store():
+            await self.message_store.serialize(path / "messages_store")
+            
+        async def save_files():
+            serialized_files = {}
+            for name, file in self.file_store.data.items():
+                serialized_files[name] = await file.serialize()
+            
+            async with aiofiles.open(path / "files.json", "w") as f:
+                await f.write(json.dumps(serialized_files))
+            
+        async def save_metadata():
+            serialized_metadata = {}
+            for key, meta in self.metadata_store.data.items():
+                serialized_metadata[key] = await meta.serialize()
+            
+            async with aiofiles.open(path / "metadata.json", "w") as f:
+                await f.write(json.dumps(serialized_metadata))
+            
+        # Save core state data
+        state_data = {
+            "session_id": self.session_id,
+            "temp_dir": self.temp_dir
+        }
+        
+        async with aiofiles.open(path / "state.json", "w") as f:
+            await f.write(json.dumps(state_data))
+            
+        await asyncio.gather(
+            save_messages_store(),
+            save_files(),
+            save_metadata()
+        )
+
+    async def deserialize(self, path: Union[str, Path]) -> None:
+        """
+        Deserialize agent state from disk.
+        
+        :param path: Directory path containing serialized data
+        :type path: Union[str, Path]
+        """
+        path = Path(path)
+        
+        # Load core state data
+        async with aiofiles.open(path / "state.json", "r") as f:
+            state_data = json.loads(await f.read())
+            self.session_id = state_data["session_id"]
+            self.temp_dir = state_data["temp_dir"]
+        
+        # Load stores concurrently
+        async def load_messages_store():
+            # Ensure we create proper HNSWStore instance
+            if not isinstance(self.message_store, HNSWStore):
+                self.message_store = HNSWStore()
+            await self.message_store.deserialize(path / "messages_store")
+            
+        async def load_files():
+            # Ensure we create proper HNSWStore instance
+            if not isinstance(self.file_store, HNSWStore):
+                self.file_store = HNSWStore()
+                
+            async with aiofiles.open(path / "files.json", "r") as f:
+                file_data = json.loads(await f.read())
+            
+            # Deserialize files and add to store
+            for name, serialized_file in file_data.items():
+                file = await File.deserialize(serialized_file)
+                await self.file_store.add(
+                    text=str(file.content),
+                    metadata=file
+                )
+            
+        async def load_metadata():
+            # Ensure we create proper HNSWStore instance
+            if not isinstance(self.metadata_store, HNSWStore):
+                self.metadata_store = HNSWStore()
+                
+            async with aiofiles.open(path / "metadata.json", "r") as f:
+                metadata_data = json.loads(await f.read())
+            
+            # Deserialize metadata and add to store
+            for key, serialized_meta in metadata_data.items():
+                metadata = await Metadata.deserialize(serialized_meta)
+                await self.metadata_store.add(
+                    text=str(metadata.data),
+                    metadata=metadata
+                )
+        
+        await asyncio.gather(
+            load_messages_store(),
+            load_files(),
+            load_metadata()
+        )
+
+    class Config:
+        """Pydantic model configuration"""
+        arbitrary_types_allowed = True  # Allow custom classes like HNSWStore

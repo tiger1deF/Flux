@@ -30,7 +30,7 @@ setup(
         "aiofiles",
         "aiohttp",
         "plotly",
-        "pandas",
+        "polars",
         "numpy",
     ],
     extras_require={

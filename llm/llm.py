@@ -4,11 +4,9 @@ from functools import lru_cache
 import weakref
 import asyncio
 import threading
-import contextlib
 import types
 
 from llm.models import LLMParameter
-from utils.summarization import truncate_text
 
 
 class LLM:
@@ -33,6 +31,8 @@ class LLM:
     :type temperature: float
     :ivar max_tokens: Maximum number of tokens in the response
     :type max_tokens: int
+    :ivar input_tokens: Maximum number of tokens in the input
+    :type input_tokens: int
     :ivar system_prompt: System prompt to prepend to queries
     :type system_prompt: str
     """
@@ -41,10 +41,31 @@ class LLM:
     _thread_local = threading.local()
     _lock = threading.Lock()
     
+    # Standard parameters
     top_p: float = 0.9
     temperature: float = 0.1
-    max_tokens: int = 1_000
+    max_tokens: int = 2_000
     system_prompt: str = None
+    context_length: int = 10_000
+
+    # Parameter mapping for normalization
+    CONTEXT_LENGTH_PARAMS = {
+        "context_length",
+        "input_tokens",
+        "context_window",
+        "max_input_tokens",
+        "max_context_length",
+        "context_window_size",
+    }
+
+    MAX_TOKENS_PARAMS = {
+        "max_tokens",
+        "response_tokens",
+        "output_tokens",
+        "max_output_tokens",
+        "max_completion_tokens",
+        "completion_tokens",
+    }
     
 
     def __init__(self, completion_fn: Callable, **default_params):
@@ -57,8 +78,10 @@ class LLM:
         :type default_params: Dict[str, Any]
         """
         self.completion_fn = completion_fn  
-        self.default_params = default_params
         self.is_async = inspect.iscoroutinefunction(completion_fn)
+        
+        # Normalize parameters first
+        self.default_params = self._normalize_parameters(default_params)
         
         cached_inspection = self._function_cache.get(completion_fn)
         if cached_inspection:
@@ -75,140 +98,93 @@ class LLM:
                 'call_impl': self._call_impl
             }
        
-        self._validate_types(**default_params)
+        self._validate_types(**self.default_params)
 
+    def _normalize_parameters(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize parameter names while preserving originals."""
+        normalized = params.copy()
+        
+        # Handle context length parameters
+        for param in params:
+            if param in self.CONTEXT_LENGTH_PARAMS and param != "context_length":
+                normalized["context_length"] = params[param]
+                
+        # Handle max tokens parameters
+        for param in params:
+            if param in self.MAX_TOKENS_PARAMS and param != "max_tokens":
+                normalized["max_tokens"] = params[param]
+        
+        return normalized
 
     def _build_call_implementation(self):
-        """
-        Builds the appropriate call implementation based on the completion function's signature.
-        
-        This method creates either a synchronous or asynchronous implementation depending on
-        the completion function type and whether token limiting is required.
-        """
-        token_limit_params = ["input_tokens", "max_input_tokens"]
-        has_token_limit = any(
-            param.name in token_limit_params 
-            for param in self.parameters
-        ) or any(
-            param in token_limit_params 
-            for param in self.default_params
-        )
-        
-        token_param = next(
-            (param for param in token_limit_params if param in self.default_params),
-            next(
-                (param.name for param in self.parameters if param.name in token_limit_params),
-                None
-            )
-        )
-
-        # Get valid parameter names from the completion function
+        """Build optimized call implementation."""
         valid_params = {param.name for param in self.parameters}
         
-        if has_token_limit:
-            if self.is_async:
-                async def _call_impl(self, query: str, **kwargs):
-                    # Filter kwargs to only include valid parameters
-                    call_args = {
-                        k: v for k, v in self.default_params.items() 
-                        if k in valid_params
-                    }
-                    call_args.update({
-                        k: v for k, v in kwargs.items() 
-                        if k in valid_params
-                    })
-                    
-                    input_text = f"{self.system_prompt}\n\n{query}" if self.system_prompt else query
-                    max_tokens = call_args.get(token_param)
-                    input_text = truncate_text(input_text, max_tokens) if max_tokens else input_text
-                    call_args[self.input_param_name] = input_text
-                    
-                    async with self._async_lock():
-                        return await self.completion_fn(**call_args)
-            else:
-                def _call_impl(self, query: str, **kwargs):
-                    # Filter kwargs to only include valid parameters
-                    call_args = {
-                        k: v for k, v in self.default_params.items() 
-                        if k in valid_params
-                    }
-                    call_args.update({
-                        k: v for k, v in kwargs.items() 
-                        if k in valid_params
-                    })
-                    
-                    input_text = f"{self.system_prompt}\n\n{query}" if self.system_prompt else query
-                    max_tokens = call_args.get(token_param)
-                    input_text = truncate_text(input_text, max_tokens) if max_tokens else input_text
-                    call_args[self.input_param_name] = input_text
-                    
-                    with self._lock:
-                        return self.completion_fn(**call_args)
+        # Pre-compute filtered default args
+        self._filtered_defaults = {
+            k: v for k, v in self.default_params.items() 
+            if k in valid_params
+        }
+        
+        # Pre-compute token limit check
+        self._has_token_limit = any(
+            param in self.CONTEXT_LENGTH_PARAMS.union(self.MAX_TOKENS_PARAMS)
+            for param in valid_params
+        )
+        
+        if self.is_async:
+            async def _call_impl(self, query: str, **kwargs):
+                # Start with pre-filtered defaults
+                call_args = self._filtered_defaults.copy()
+                
+                # Update with filtered kwargs
+                call_args.update({
+                    k: v for k, v in kwargs.items() 
+                    if k in valid_params
+                })
+                
+                # Normalize any new parameters from kwargs
+                normalized_kwargs = self._normalize_parameters(kwargs)
+                call_args.update({
+                    k: v for k, v in normalized_kwargs.items()
+                    if k in valid_params and k not in kwargs
+                })
+                
+                # Prepare input text
+                input_text = f"{self.system_prompt}\n\n{query}" if self.system_prompt else query
+                call_args[self.input_param_name] = input_text
+                
+                return await self.completion_fn(**call_args)
         else:
-            if self.is_async:
-                async def _call_impl(self, query: str, **kwargs):
-                    # Filter kwargs to only include valid parameters
-                    call_args = {
-                        k: v for k, v in self.default_params.items() 
-                        if k in valid_params
-                    }
-                    call_args.update({
-                        k: v for k, v in kwargs.items() 
-                        if k in valid_params
-                    })
-                    
-                    input_text = f"{self.system_prompt}\n\n{query}" if self.system_prompt else query
-                    call_args[self.input_param_name] = input_text
-                    
-                    async with self._async_lock():
-                        return await self.completion_fn(**call_args)
-            else:
-                def _call_impl(self, query: str, **kwargs):
-                    # Filter kwargs to only include valid parameters
-                    call_args = {
-                        k: v for k, v in self.default_params.items() 
-                        if k in valid_params
-                    }
-                    call_args.update({
-                        k: v for k, v in kwargs.items() 
-                        if k in valid_params
-                    })
-                    
-                    input_text = f"{self.system_prompt}\n\n{query}" if self.system_prompt else query
-                    call_args[self.input_param_name] = input_text
-                    
-                    with self._lock:
-                        return self.completion_fn(**call_args)
+            def _call_impl(self, query: str, **kwargs):
+                # Start with pre-filtered defaults
+                call_args = self._filtered_defaults.copy()
+                
+                # Update with filtered kwargs
+                call_args.update({
+                    k: v for k, v in kwargs.items() 
+                    if k in valid_params
+                })
+                
+                # Normalize any new parameters from kwargs
+                normalized_kwargs = self._normalize_parameters(kwargs)
+                call_args.update({
+                    k: v for k, v in normalized_kwargs.items()
+                    if k in valid_params and k not in kwargs
+                })
+                
+                # Prepare input text
+                input_text = f"{self.system_prompt}\n\n{query}" if self.system_prompt else query
+            
+                call_args[self.input_param_name] = input_text
+                return self.completion_fn(**call_args)
 
         self._call_impl = types.MethodType(_call_impl, self)
 
 
     def __call__(self, query: str, **kwargs) -> Union[str, Coroutine[Any, Any, str]]:
-        """
-        Call the wrapped completion function with the given query and parameters.
-
-        :param query: The input text to send to the language model
-        :type query: str
-        :param kwargs: Additional parameters to pass to the completion function
-        :type kwargs: Dict[str, Any]
-        :return: The completion result (or coroutine for async functions)
-        :rtype: Union[str, Coroutine[Any, Any, str]]
-        """
-        if self.is_async:
-            return self._call_impl(query, **kwargs)
+        """Call implementation that properly handles sync/async contexts"""
         return self._call_impl(query, **kwargs)
-
-
-    @contextlib.asynccontextmanager
-    async def _async_lock(self):
-        """
-        Async context manager for thread safety in async operations.
-
-        :yield: The acquired lock
-        """
-        loop = asyncio.get_event_loop()
-        with self._lock:
-            yield
 
 
     @staticmethod
@@ -240,9 +216,9 @@ class LLM:
         self.parameters = []
         self.input_param_name = None
         
-        input_param_priorities = [
+        input_param_priorities = {
             "text", "prompt", "query", "input", "message", "content"
-        ]
+        }
 
         for param_name, param in signature.parameters.items():
             param_type = type_hints.get(param_name, Any)

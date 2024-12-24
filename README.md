@@ -101,28 +101,6 @@ asyncio.run(main())
 - Serialization utilities
 - State persistence
 
-## 🔧 Dependencies
-
-Core dependencies:
-```
-msgpack>=1.0.5
-orjson>=3.9.10
-google-generativeai
-hnswlib
-aiofiles
-aiohttp
-plotly
-pandas
-numpy
-```
-
-Optional dependencies:
-```
-sentence-transformers[torch]>=2.5.0
-torch
-transformers
-```
-
 ## 🤝 Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.

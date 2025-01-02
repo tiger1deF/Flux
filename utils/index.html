@@ -1,0 +1,459 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Utilities &mdash; Flux 0.2 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=10f1778b"></script>
+      <script src="../_static/doctools.js?v=9a2dae69"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Tests" href="../tests/index.html" />
+    <link rel="prev" title="Inference" href="../llm/inference.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            Flux
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Core Components</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../agents/index.html">Agents</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../llm/index.html">Language Models</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Utilities</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#core-utilities">Core Utilities</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#serialization">Serialization</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#utils.serialization.get_compressor"><code class="docutils literal notranslate"><span class="pre">get_compressor()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#utils.serialization.get_decompressor"><code class="docutils literal notranslate"><span class="pre">get_decompressor()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#utils.serialization.SerializationType"><code class="docutils literal notranslate"><span class="pre">SerializationType</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#utils.serialization.SerializationType.ARROW"><code class="docutils literal notranslate"><span class="pre">SerializationType.ARROW</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#utils.serialization.SerializationType.PLOTLY"><code class="docutils literal notranslate"><span class="pre">SerializationType.PLOTLY</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#utils.serialization.SerializationType.MSGPACK"><code class="docutils literal notranslate"><span class="pre">SerializationType.MSGPACK</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#utils.serialization.SerializationType.PICKLE"><code class="docutils literal notranslate"><span class="pre">SerializationType.PICKLE</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#utils.serialization.SerializationType.NUMPY"><code class="docutils literal notranslate"><span class="pre">SerializationType.NUMPY</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#utils.serialization.SerializationType.IMAGE"><code class="docutils literal notranslate"><span class="pre">SerializationType.IMAGE</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#utils.serialization.SerializationType.PARQUET"><code class="docutils literal notranslate"><span class="pre">SerializationType.PARQUET</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#utils.serialization.SerializationType.JSON"><code class="docutils literal notranslate"><span class="pre">SerializationType.JSON</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#utils.serialization.SerializationType.NONE"><code class="docutils literal notranslate"><span class="pre">SerializationType.NONE</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#utils.serialization.JSON_COMPATIBLE_TYPES"><code class="docutils literal notranslate"><span class="pre">JSON_COMPATIBLE_TYPES</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#utils.serialization.TYPE_SERIALIZATION_MAP"><code class="docutils literal notranslate"><span class="pre">TYPE_SERIALIZATION_MAP</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#utils.serialization.ExecutorManager"><code class="docutils literal notranslate"><span class="pre">ExecutorManager</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#utils.serialization.ExecutorManager.get_instance"><code class="docutils literal notranslate"><span class="pre">ExecutorManager.get_instance()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#utils.serialization.ExecutorManager.get_thread_pool"><code class="docutils literal notranslate"><span class="pre">ExecutorManager.get_thread_pool()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#utils.serialization.ExecutorManager.get_process_pool"><code class="docutils literal notranslate"><span class="pre">ExecutorManager.get_process_pool()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#utils.serialization.ExecutorManager.cleanup"><code class="docutils literal notranslate"><span class="pre">ExecutorManager.cleanup()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#utils.serialization.serialize_metadata"><code class="docutils literal notranslate"><span class="pre">serialize_metadata()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#utils.serialization.unserialize_metadata"><code class="docutils literal notranslate"><span class="pre">unserialize_metadata()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#utils.serialization.deserialize_metadata"><code class="docutils literal notranslate"><span class="pre">deserialize_metadata()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#utils.serialization.serialization_context"><code class="docutils literal notranslate"><span class="pre">serialization_context()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#utils.serialization.serialize_and_compress"><code class="docutils literal notranslate"><span class="pre">serialize_and_compress()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#utils.serialization.decompress_and_deserialize"><code class="docutils literal notranslate"><span class="pre">decompress_and_deserialize()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#summarization">Summarization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#tokenizer">Tokenizer</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../tests/index.html">Tests</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">Flux</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Utilities</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/utils/index.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="utilities">
+<h1>Utilities<a class="headerlink" href="#utilities" title="Link to this heading"></a></h1>
+<div class="toctree-wrapper compound">
+</div>
+<section id="core-utilities">
+<h2>Core Utilities<a class="headerlink" href="#core-utilities" title="Link to this heading"></a></h2>
+</section>
+<section id="serialization">
+<span id="module-utils"></span><h2>Serialization<a class="headerlink" href="#serialization" title="Link to this heading"></a></h2>
+<p id="module-utils.serialization">Serialization utilities for handling various data types and formats.</p>
+<p>This module provides functionality for serializing and deserializing different data types
+including polars DataFrames, numpy arrays, Plotly figures, PIL Images, and more. It supports
+both synchronous and asynchronous operations with thread and process pool executors.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="utils.serialization.get_compressor">
+<span class="sig-prename descclassname"><span class="pre">utils.serialization.</span></span><span class="sig-name descname"><span class="pre">get_compressor</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/utils/serialization.html#get_compressor"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#utils.serialization.get_compressor" title="Link to this definition"></a></dt>
+<dd><p>Get or create a thread-safe ZStandard compressor instance.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>A compressor instance with compression level 3</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>zstd.ZstdCompressor</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="utils.serialization.get_decompressor">
+<span class="sig-prename descclassname"><span class="pre">utils.serialization.</span></span><span class="sig-name descname"><span class="pre">get_decompressor</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/utils/serialization.html#get_decompressor"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#utils.serialization.get_decompressor" title="Link to this definition"></a></dt>
+<dd><p>Get or create a thread-safe ZStandard decompressor instance.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>A decompressor instance</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>zstd.ZstdDecompressor</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="utils.serialization.SerializationType">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">utils.serialization.</span></span><span class="sig-name descname"><span class="pre">SerializationType</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/utils/serialization.html#SerializationType"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#utils.serialization.SerializationType" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/enum.html#enum.Enum" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Enum</span></code></a></p>
+<p>Enumeration of supported serialization types.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Variables<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>ARROW</strong> – Apache Arrow serialization for polars DataFrames</p></li>
+<li><p><strong>PLOTLY</strong> – Plotly figure serialization</p></li>
+<li><p><strong>MSGPACK</strong> – MessagePack serialization for basic Python types</p></li>
+<li><p><strong>PICKLE</strong> – Python pickle serialization (fallback)</p></li>
+<li><p><strong>NUMPY</strong> – NumPy array serialization</p></li>
+<li><p><strong>IMAGE</strong> – PIL Image serialization</p></li>
+<li><p><strong>PARQUET</strong> – Apache Parquet serialization</p></li>
+<li><p><strong>JSON</strong> – JSON serialization</p></li>
+<li><p><strong>NONE</strong> – No serialization needed</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="utils.serialization.SerializationType.ARROW">
+<span class="sig-name descname"><span class="pre">ARROW</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">1</span></em><a class="headerlink" href="#utils.serialization.SerializationType.ARROW" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="utils.serialization.SerializationType.PLOTLY">
+<span class="sig-name descname"><span class="pre">PLOTLY</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">2</span></em><a class="headerlink" href="#utils.serialization.SerializationType.PLOTLY" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="utils.serialization.SerializationType.MSGPACK">
+<span class="sig-name descname"><span class="pre">MSGPACK</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">3</span></em><a class="headerlink" href="#utils.serialization.SerializationType.MSGPACK" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="utils.serialization.SerializationType.PICKLE">
+<span class="sig-name descname"><span class="pre">PICKLE</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">4</span></em><a class="headerlink" href="#utils.serialization.SerializationType.PICKLE" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="utils.serialization.SerializationType.NUMPY">
+<span class="sig-name descname"><span class="pre">NUMPY</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">5</span></em><a class="headerlink" href="#utils.serialization.SerializationType.NUMPY" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="utils.serialization.SerializationType.IMAGE">
+<span class="sig-name descname"><span class="pre">IMAGE</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">6</span></em><a class="headerlink" href="#utils.serialization.SerializationType.IMAGE" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="utils.serialization.SerializationType.PARQUET">
+<span class="sig-name descname"><span class="pre">PARQUET</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">7</span></em><a class="headerlink" href="#utils.serialization.SerializationType.PARQUET" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="utils.serialization.SerializationType.JSON">
+<span class="sig-name descname"><span class="pre">JSON</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">8</span></em><a class="headerlink" href="#utils.serialization.SerializationType.JSON" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="utils.serialization.SerializationType.NONE">
+<span class="sig-name descname"><span class="pre">NONE</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">9</span></em><a class="headerlink" href="#utils.serialization.SerializationType.NONE" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="utils.serialization.JSON_COMPATIBLE_TYPES">
+<span class="sig-prename descclassname"><span class="pre">utils.serialization.</span></span><span class="sig-name descname"><span class="pre">JSON_COMPATIBLE_TYPES</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">frozenset({&lt;class</span> <span class="pre">'NoneType'&gt;,</span> <span class="pre">&lt;class</span> <span class="pre">'bool'&gt;,</span> <span class="pre">&lt;class</span> <span class="pre">'float'&gt;,</span> <span class="pre">&lt;class</span> <span class="pre">'int'&gt;,</span> <span class="pre">&lt;class</span> <span class="pre">'str'&gt;})</span></em><a class="headerlink" href="#utils.serialization.JSON_COMPATIBLE_TYPES" title="Link to this definition"></a></dt>
+<dd><p>Set of types that are JSON-compatible and don’t need serialization.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Variables<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>JSON_COMPATIBLE_TYPES</strong> – Set of Python types that can be directly serialized to JSON</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="utils.serialization.TYPE_SERIALIZATION_MAP">
+<span class="sig-prename descclassname"><span class="pre">utils.serialization.</span></span><span class="sig-name descname"><span class="pre">TYPE_SERIALIZATION_MAP</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">{&lt;class</span> <span class="pre">'PIL.Image.Image'&gt;:</span> <span class="pre">SerializationType.IMAGE,</span> <span class="pre">&lt;class</span> <span class="pre">'bytes'&gt;:</span> <span class="pre">SerializationType.MSGPACK,</span> <span class="pre">&lt;class</span> <span class="pre">'dict'&gt;:</span> <span class="pre">SerializationType.MSGPACK,</span> <span class="pre">&lt;class</span> <span class="pre">'frozenset'&gt;:</span> <span class="pre">SerializationType.JSON,</span> <span class="pre">&lt;class</span> <span class="pre">'list'&gt;:</span> <span class="pre">SerializationType.MSGPACK,</span> <span class="pre">&lt;class</span> <span class="pre">'numpy.ndarray'&gt;:</span> <span class="pre">SerializationType.NUMPY,</span> <span class="pre">&lt;class</span> <span class="pre">'plotly.graph_objs._figure.Figure'&gt;:</span> <span class="pre">SerializationType.PLOTLY,</span> <span class="pre">&lt;class</span> <span class="pre">'polars.dataframe.frame.DataFrame'&gt;:</span> <span class="pre">SerializationType.ARROW,</span> <span class="pre">&lt;class</span> <span class="pre">'set'&gt;:</span> <span class="pre">SerializationType.JSON,</span> <span class="pre">&lt;class</span> <span class="pre">'tuple'&gt;:</span> <span class="pre">SerializationType.MSGPACK}</span></em><a class="headerlink" href="#utils.serialization.TYPE_SERIALIZATION_MAP" title="Link to this definition"></a></dt>
+<dd><p>Mapping of Python types to their corresponding serialization methods.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Variables<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>TYPE_SERIALIZATION_MAP</strong> – Dictionary mapping Python types to SerializationType enums</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="utils.serialization.ExecutorManager">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">utils.serialization.</span></span><span class="sig-name descname"><span class="pre">ExecutorManager</span></span><a class="reference internal" href="../_modules/utils/serialization.html#ExecutorManager"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#utils.serialization.ExecutorManager" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>Singleton manager for thread and process pool executors.</p>
+<p>This class manages thread-local and process-wide executor pools for
+parallel serialization operations.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Variables<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>_instance</strong> – Singleton instance</p></li>
+<li><p><strong>_lock</strong> – Lock for thread-safe singleton creation</p></li>
+<li><p><strong>_thread_executor</strong> – Thread pool executor instance</p></li>
+<li><p><strong>_process_executor</strong> – Process pool executor instance</p></li>
+<li><p><strong>_thread_local</strong> – Thread-local storage</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="utils.serialization.ExecutorManager.get_instance">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">get_instance</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/utils/serialization.html#ExecutorManager.get_instance"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#utils.serialization.ExecutorManager.get_instance" title="Link to this definition"></a></dt>
+<dd><p>Get or create the singleton instance of ExecutorManager.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The singleton ExecutorManager instance</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="#utils.serialization.ExecutorManager" title="utils.serialization.ExecutorManager">ExecutorManager</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="utils.serialization.ExecutorManager.get_thread_pool">
+<span class="sig-name descname"><span class="pre">get_thread_pool</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/utils/serialization.html#ExecutorManager.get_thread_pool"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#utils.serialization.ExecutorManager.get_thread_pool" title="Link to this definition"></a></dt>
+<dd><p>Get or create a thread pool executor for the current thread.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Thread pool executor instance</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>ThreadPoolExecutor</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="utils.serialization.ExecutorManager.get_process_pool">
+<span class="sig-name descname"><span class="pre">get_process_pool</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/utils/serialization.html#ExecutorManager.get_process_pool"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#utils.serialization.ExecutorManager.get_process_pool" title="Link to this definition"></a></dt>
+<dd><p>Get or create a process pool executor.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Process pool executor instance</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>ProcessPoolExecutor</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="utils.serialization.ExecutorManager.cleanup">
+<span class="sig-name descname"><span class="pre">cleanup</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/utils/serialization.html#ExecutorManager.cleanup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#utils.serialization.ExecutorManager.cleanup" title="Link to this definition"></a></dt>
+<dd><p>Clean up thread and process pool executors.</p>
+<p>Shuts down all executor pools and removes thread-local storage.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="utils.serialization.serialize_metadata">
+<em class="property"><span class="k"><span class="pre">async</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">utils.serialization.</span></span><span class="sig-name descname"><span class="pre">serialize_metadata</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">response_metadata</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">end_state</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/utils/serialization.html#serialize_metadata"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#utils.serialization.serialize_metadata" title="Link to this definition"></a></dt>
+<dd><p>Serialize metadata dictionary containing various data types.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>response_metadata</strong> (<em>Dict</em><em>[</em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><em>str</em></a><em>, </em><em>Any</em><em>]</em>) – Dictionary containing metadata to serialize</p></li>
+<li><p><strong>end_state</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether this is the final state</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Dictionary containing serialized data</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Dict[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)">str</a>, Any]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="utils.serialization.unserialize_metadata">
+<em class="property"><span class="k"><span class="pre">async</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">utils.serialization.</span></span><span class="sig-name descname"><span class="pre">unserialize_metadata</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">response_metadata</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/utils/serialization.html#unserialize_metadata"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#utils.serialization.unserialize_metadata" title="Link to this definition"></a></dt>
+<dd><p>Unserialize metadata dictionary containing various data types.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>response_metadata</strong> (<em>Dict</em><em>[</em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><em>str</em></a><em>, </em><em>Any</em><em>]</em>) – Dictionary containing serialized metadata</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Dictionary containing unserialized data</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Dict[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)">str</a>, Any]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="utils.serialization.deserialize_metadata">
+<em class="property"><span class="k"><span class="pre">async</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">utils.serialization.</span></span><span class="sig-name descname"><span class="pre">deserialize_metadata</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">serialized_data</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/utils/serialization.html#deserialize_metadata"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#utils.serialization.deserialize_metadata" title="Link to this definition"></a></dt>
+<dd><p>Deserialize metadata dictionary containing various data types.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>serialized_data</strong> (<em>Dict</em><em>[</em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><em>str</em></a><em>, </em><em>Any</em><em>]</em>) – Dictionary containing serialized metadata</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Dictionary containing deserialized data</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Dict[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)">str</a>, Any]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="utils.serialization.serialization_context">
+<span class="sig-prename descclassname"><span class="pre">utils.serialization.</span></span><span class="sig-name descname"><span class="pre">serialization_context</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/utils/serialization.html#serialization_context"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#utils.serialization.serialization_context" title="Link to this definition"></a></dt>
+<dd><p>Context manager for managing serialization resources.</p>
+<p>Ensures proper cleanup of executor pools after serialization operations.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Yield<span class="colon">:</span></dt>
+<dd class="field-odd"><p>None</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="utils.serialization.serialize_and_compress">
+<em class="property"><span class="k"><span class="pre">async</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">utils.serialization.</span></span><span class="sig-name descname"><span class="pre">serialize_and_compress</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/utils/serialization.html#serialize_and_compress"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#utils.serialization.serialize_and_compress" title="Link to this definition"></a></dt>
+<dd><p>Serialize and compress data in a format-aware way.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>data</strong> (<em>Any</em>) – Data to serialize and compress</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Compressed serialized data</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#bytes" title="(in Python v3.13)">bytes</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="utils.serialization.decompress_and_deserialize">
+<em class="property"><span class="k"><span class="pre">async</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">utils.serialization.</span></span><span class="sig-name descname"><span class="pre">decompress_and_deserialize</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">expected_type</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/utils/serialization.html#decompress_and_deserialize"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#utils.serialization.decompress_and_deserialize" title="Link to this definition"></a></dt>
+<dd><p>Decompress and deserialize data with type checking.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>data</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#bytes" title="(in Python v3.13)"><em>bytes</em></a>) – Compressed serialized data</p></li>
+<li><p><strong>expected_type</strong> (<em>Type</em><em>, </em><em>optional</em>) – Expected type of deserialized data</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Deserialized data</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Any</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+<section id="summarization">
+<h2>Summarization<a class="headerlink" href="#summarization" title="Link to this heading"></a></h2>
+</section>
+<section id="tokenizer">
+<h2>Tokenizer<a class="headerlink" href="#tokenizer" title="Link to this heading"></a></h2>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="../llm/inference.html" class="btn btn-neutral float-left" title="Inference" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="../tests/index.html" class="btn btn-neutral float-right" title="Tests" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, Christian de Frondeville.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

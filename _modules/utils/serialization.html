@@ -1,0 +1,916 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>utils.serialization &mdash; Flux 0.2 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=10f1778b"></script>
+      <script src="../../_static/doctools.js?v=9a2dae69"></script>
+      <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            Flux
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Core Components</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../agents/index.html">Agents</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../llm/index.html">Language Models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../utils/index.html">Utilities</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tests/index.html">Tests</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">Flux</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">utils.serialization</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for utils.serialization</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Serialization utilities for handling various data types and formats.</span>
+
+<span class="sd">This module provides functionality for serializing and deserializing different data types</span>
+<span class="sd">including polars DataFrames, numpy arrays, Plotly figures, PIL Images, and more. It supports</span>
+<span class="sd">both synchronous and asynchronous operations with thread and process pool executors.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span> <span class="nn">enum</span> <span class="kn">import</span> <span class="n">Enum</span><span class="p">,</span> <span class="n">auto</span>
+<span class="kn">from</span> <span class="nn">functools</span> <span class="kn">import</span> <span class="n">lru_cache</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">Set</span><span class="p">,</span> <span class="n">Type</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Tuple</span>
+<span class="kn">import</span> <span class="nn">base64</span>
+<span class="kn">import</span> <span class="nn">json</span>
+<span class="kn">import</span> <span class="nn">msgpack</span>
+<span class="kn">import</span> <span class="nn">pickle</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">from</span> <span class="nn">concurrent.futures</span> <span class="kn">import</span> <span class="n">ThreadPoolExecutor</span><span class="p">,</span> <span class="n">ProcessPoolExecutor</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">pyarrow</span> <span class="k">as</span> <span class="nn">pa</span>
+<span class="kn">import</span> <span class="nn">plotly.graph_objects</span> <span class="k">as</span> <span class="nn">go</span>
+<span class="kn">import</span> <span class="nn">zstandard</span> <span class="k">as</span> <span class="nn">zstd</span> 
+<span class="kn">from</span> <span class="nn">PIL</span> <span class="kn">import</span> <span class="n">Image</span>
+<span class="kn">import</span> <span class="nn">io</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">threading</span>
+<span class="kn">import</span> <span class="nn">asyncio</span>
+<span class="kn">import</span> <span class="nn">contextlib</span>
+<span class="kn">import</span> <span class="nn">polars</span> <span class="k">as</span> <span class="nn">pl</span>
+
+<span class="c1"># TODO - Centralize, remove elsewhere</span>
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+<span class="c1"># Thread-safe compressor instances</span>
+<span class="n">_compression_lock</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span>  <span class="c1"># Lock for thread-safe compressor access</span>
+<span class="n">_compressor</span> <span class="o">=</span> <span class="kc">None</span>  <span class="c1"># Global ZStandard compressor instance</span>
+<span class="n">_decompressor</span> <span class="o">=</span> <span class="kc">None</span>  <span class="c1"># Global ZStandard decompressor instance</span>
+
+
+<div class="viewcode-block" id="get_compressor">
+<a class="viewcode-back" href="../../utils/index.html#utils.serialization.get_compressor">[docs]</a>
+<span class="k">def</span> <span class="nf">get_compressor</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Get or create a thread-safe ZStandard compressor instance.</span>
+
+<span class="sd">    :return: A compressor instance with compression level 3</span>
+<span class="sd">    :rtype: zstd.ZstdCompressor</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">global</span> <span class="n">_compressor</span>
+    <span class="k">with</span> <span class="n">_compression_lock</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">_compressor</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">_compressor</span> <span class="o">=</span> <span class="n">zstd</span><span class="o">.</span><span class="n">ZstdCompressor</span><span class="p">(</span><span class="n">level</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">_compressor</span></div>
+
+
+
+<div class="viewcode-block" id="get_decompressor">
+<a class="viewcode-back" href="../../utils/index.html#utils.serialization.get_decompressor">[docs]</a>
+<span class="k">def</span> <span class="nf">get_decompressor</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Get or create a thread-safe ZStandard decompressor instance.</span>
+
+<span class="sd">    :return: A decompressor instance</span>
+<span class="sd">    :rtype: zstd.ZstdDecompressor</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">global</span> <span class="n">_decompressor</span>
+    <span class="k">with</span> <span class="n">_compression_lock</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">_decompressor</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">_decompressor</span> <span class="o">=</span> <span class="n">zstd</span><span class="o">.</span><span class="n">ZstdDecompressor</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">_decompressor</span></div>
+
+
+
+<div class="viewcode-block" id="SerializationType">
+<a class="viewcode-back" href="../../utils/index.html#utils.serialization.SerializationType">[docs]</a>
+<span class="k">class</span> <span class="nc">SerializationType</span><span class="p">(</span><span class="n">Enum</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Enumeration of supported serialization types.</span>
+<span class="sd">    </span>
+<span class="sd">    :cvar ARROW: Apache Arrow serialization for polars DataFrames</span>
+<span class="sd">    :cvar PLOTLY: Plotly figure serialization</span>
+<span class="sd">    :cvar MSGPACK: MessagePack serialization for basic Python types</span>
+<span class="sd">    :cvar PICKLE: Python pickle serialization (fallback)</span>
+<span class="sd">    :cvar NUMPY: NumPy array serialization</span>
+<span class="sd">    :cvar IMAGE: PIL Image serialization</span>
+<span class="sd">    :cvar PARQUET: Apache Parquet serialization</span>
+<span class="sd">    :cvar JSON: JSON serialization</span>
+<span class="sd">    :cvar NONE: No serialization needed</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">ARROW</span> <span class="o">=</span> <span class="n">auto</span><span class="p">()</span>
+    <span class="n">PLOTLY</span> <span class="o">=</span> <span class="n">auto</span><span class="p">()</span>
+    <span class="n">MSGPACK</span> <span class="o">=</span> <span class="n">auto</span><span class="p">()</span>
+    <span class="n">PICKLE</span> <span class="o">=</span> <span class="n">auto</span><span class="p">()</span>
+    <span class="n">NUMPY</span> <span class="o">=</span> <span class="n">auto</span><span class="p">()</span>
+    <span class="n">IMAGE</span> <span class="o">=</span> <span class="n">auto</span><span class="p">()</span>
+    <span class="n">PARQUET</span> <span class="o">=</span> <span class="n">auto</span><span class="p">()</span>
+    <span class="n">JSON</span> <span class="o">=</span> <span class="n">auto</span><span class="p">()</span>
+    <span class="n">NONE</span> <span class="o">=</span> <span class="n">auto</span><span class="p">()</span></div>
+
+
+
+<span class="n">JSON_COMPATIBLE_TYPES</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">([</span><span class="nb">type</span><span class="p">(</span><span class="kc">None</span><span class="p">),</span> <span class="nb">bool</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">float</span><span class="p">,</span> <span class="nb">str</span><span class="p">])</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Set of types that are JSON-compatible and don&#39;t need serialization.</span>
+
+<span class="sd">:ivar JSON_COMPATIBLE_TYPES: Set of Python types that can be directly serialized to JSON</span>
+<span class="sd">:type JSON_COMPATIBLE_TYPES: frozenset</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="n">TYPE_SERIALIZATION_MAP</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span> <span class="n">SerializationType</span><span class="o">.</span><span class="n">ARROW</span><span class="p">,</span>
+    <span class="n">go</span><span class="o">.</span><span class="n">Figure</span><span class="p">:</span> <span class="n">SerializationType</span><span class="o">.</span><span class="n">PLOTLY</span><span class="p">,</span>
+    <span class="nb">dict</span><span class="p">:</span> <span class="n">SerializationType</span><span class="o">.</span><span class="n">MSGPACK</span><span class="p">,</span>
+    <span class="nb">list</span><span class="p">:</span> <span class="n">SerializationType</span><span class="o">.</span><span class="n">MSGPACK</span><span class="p">,</span>
+    <span class="nb">tuple</span><span class="p">:</span> <span class="n">SerializationType</span><span class="o">.</span><span class="n">MSGPACK</span><span class="p">,</span>
+    <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span> <span class="n">SerializationType</span><span class="o">.</span><span class="n">NUMPY</span><span class="p">,</span>
+    <span class="n">Image</span><span class="o">.</span><span class="n">Image</span><span class="p">:</span> <span class="n">SerializationType</span><span class="o">.</span><span class="n">IMAGE</span><span class="p">,</span>
+    <span class="nb">bytes</span><span class="p">:</span> <span class="n">SerializationType</span><span class="o">.</span><span class="n">MSGPACK</span><span class="p">,</span>
+    <span class="nb">set</span><span class="p">:</span> <span class="n">SerializationType</span><span class="o">.</span><span class="n">JSON</span><span class="p">,</span>
+    <span class="nb">frozenset</span><span class="p">:</span> <span class="n">SerializationType</span><span class="o">.</span><span class="n">JSON</span>
+<span class="p">}</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Mapping of Python types to their corresponding serialization methods.</span>
+
+<span class="sd">:ivar TYPE_SERIALIZATION_MAP: Dictionary mapping Python types to SerializationType enums</span>
+<span class="sd">:type TYPE_SERIALIZATION_MAP: Dict[Type, SerializationType]</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+
+<span class="c1"># Thread-local storage for executors</span>
+<div class="viewcode-block" id="ExecutorManager">
+<a class="viewcode-back" href="../../utils/index.html#utils.serialization.ExecutorManager">[docs]</a>
+<span class="k">class</span> <span class="nc">ExecutorManager</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Singleton manager for thread and process pool executors.</span>
+<span class="sd">    </span>
+<span class="sd">    This class manages thread-local and process-wide executor pools for</span>
+<span class="sd">    parallel serialization operations.</span>
+<span class="sd">    </span>
+<span class="sd">    :cvar _instance: Singleton instance</span>
+<span class="sd">    :type _instance: ExecutorManager</span>
+<span class="sd">    :cvar _lock: Lock for thread-safe singleton creation</span>
+<span class="sd">    :type _lock: threading.Lock</span>
+<span class="sd">    :ivar _thread_executor: Thread pool executor instance</span>
+<span class="sd">    :type _thread_executor: ThreadPoolExecutor</span>
+<span class="sd">    :ivar _process_executor: Process pool executor instance</span>
+<span class="sd">    :type _process_executor: ProcessPoolExecutor</span>
+<span class="sd">    :ivar _thread_local: Thread-local storage</span>
+<span class="sd">    :type _thread_local: threading.local</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">_instance</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">_lock</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span>
+    
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initialize a new ExecutorManager instance.</span>
+<span class="sd">        </span>
+<span class="sd">        :ivar _thread_executor: Thread pool executor instance</span>
+<span class="sd">        :type _thread_executor: ThreadPoolExecutor</span>
+<span class="sd">        :ivar _process_executor: Process pool executor instance</span>
+<span class="sd">        :type _process_executor: ProcessPoolExecutor</span>
+<span class="sd">        :ivar _thread_local: Thread-local storage</span>
+<span class="sd">        :type _thread_local: threading.local</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_thread_executor</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_process_executor</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_thread_local</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">local</span><span class="p">()</span>
+    
+<div class="viewcode-block" id="ExecutorManager.get_instance">
+<a class="viewcode-back" href="../../utils/index.html#utils.serialization.ExecutorManager.get_instance">[docs]</a>
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">get_instance</span><span class="p">(</span><span class="bp">cls</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Get or create the singleton instance of ExecutorManager.</span>
+<span class="sd">        </span>
+<span class="sd">        :return: The singleton ExecutorManager instance</span>
+<span class="sd">        :rtype: ExecutorManager</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">cls</span><span class="o">.</span><span class="n">_instance</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">with</span> <span class="bp">cls</span><span class="o">.</span><span class="n">_lock</span><span class="p">:</span>
+                <span class="k">if</span> <span class="bp">cls</span><span class="o">.</span><span class="n">_instance</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="bp">cls</span><span class="o">.</span><span class="n">_instance</span> <span class="o">=</span> <span class="bp">cls</span><span class="p">()</span>
+        <span class="k">return</span> <span class="bp">cls</span><span class="o">.</span><span class="n">_instance</span></div>
+
+    
+<div class="viewcode-block" id="ExecutorManager.get_thread_pool">
+<a class="viewcode-back" href="../../utils/index.html#utils.serialization.ExecutorManager.get_thread_pool">[docs]</a>
+    <span class="k">def</span> <span class="nf">get_thread_pool</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Get or create a thread pool executor for the current thread.</span>
+<span class="sd">        </span>
+<span class="sd">        :return: Thread pool executor instance</span>
+<span class="sd">        :rtype: ThreadPoolExecutor</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_thread_local</span><span class="p">,</span> <span class="s1">&#39;thread_pool&#39;</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_thread_local</span><span class="o">.</span><span class="n">thread_pool</span> <span class="o">=</span> <span class="n">ThreadPoolExecutor</span><span class="p">(</span>
+                <span class="n">max_workers</span><span class="o">=</span><span class="nb">min</span><span class="p">(</span><span class="mi">32</span><span class="p">,</span> <span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">()</span> <span class="ow">or</span> <span class="mi">1</span><span class="p">)</span> <span class="o">+</span> <span class="mi">4</span><span class="p">),</span>
+                <span class="n">thread_name_prefix</span><span class="o">=</span><span class="s1">&#39;serializer&#39;</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_thread_local</span><span class="o">.</span><span class="n">thread_pool</span></div>
+
+    
+<div class="viewcode-block" id="ExecutorManager.get_process_pool">
+<a class="viewcode-back" href="../../utils/index.html#utils.serialization.ExecutorManager.get_process_pool">[docs]</a>
+    <span class="k">def</span> <span class="nf">get_process_pool</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Get or create a process pool executor.</span>
+<span class="sd">        </span>
+<span class="sd">        :return: Process pool executor instance</span>
+<span class="sd">        :rtype: ProcessPoolExecutor</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_process_executor</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_lock</span><span class="p">:</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_process_executor</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_process_executor</span> <span class="o">=</span> <span class="n">ProcessPoolExecutor</span><span class="p">(</span>
+                        <span class="n">max_workers</span><span class="o">=</span><span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">os</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">()</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+                    <span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_process_executor</span></div>
+
+    
+<div class="viewcode-block" id="ExecutorManager.cleanup">
+<a class="viewcode-back" href="../../utils/index.html#utils.serialization.ExecutorManager.cleanup">[docs]</a>
+    <span class="k">def</span> <span class="nf">cleanup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Clean up thread and process pool executors.</span>
+<span class="sd">        </span>
+<span class="sd">        Shuts down all executor pools and removes thread-local storage.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_thread_local</span><span class="p">,</span> <span class="s1">&#39;thread_pool&#39;</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_thread_local</span><span class="o">.</span><span class="n">thread_pool</span><span class="o">.</span><span class="n">shutdown</span><span class="p">(</span><span class="n">wait</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+            <span class="nb">delattr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_thread_local</span><span class="p">,</span> <span class="s1">&#39;thread_pool&#39;</span><span class="p">)</span>
+        
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_process_executor</span><span class="p">:</span>
+            <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_lock</span><span class="p">:</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_process_executor</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_process_executor</span><span class="o">.</span><span class="n">shutdown</span><span class="p">(</span><span class="n">wait</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_process_executor</span> <span class="o">=</span> <span class="kc">None</span></div>
+</div>
+
+
+
+<span class="nd">@lru_cache</span><span class="p">(</span><span class="n">maxsize</span> <span class="o">=</span> <span class="mi">128</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">_get_type_category</span><span class="p">(</span><span class="bp">cls</span><span class="p">:</span> <span class="n">Type</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SerializationType</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Get the serialization type for a given class.</span>
+
+<span class="sd">    :param cls: The class type to get serialization type for</span>
+<span class="sd">    :type cls: Type</span>
+<span class="sd">    :return: The appropriate serialization type enum value</span>
+<span class="sd">    :rtype: SerializationType</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">TYPE_SERIALIZATION_MAP</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">SerializationType</span><span class="o">.</span><span class="n">PICKLE</span><span class="p">)</span>
+
+
+<span class="k">async</span> <span class="k">def</span> <span class="nf">_needs_serialization</span><span class="p">(</span><span class="n">item</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="n">_seen</span><span class="p">:</span> <span class="n">Set</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Check if an item needs serialization.</span>
+<span class="sd">    </span>
+<span class="sd">    :param item: Item to check</span>
+<span class="sd">    :type item: Any</span>
+<span class="sd">    :param _seen: Set of already seen object IDs for cycle detection</span>
+<span class="sd">    :type _seen: Set, optional</span>
+<span class="sd">    :return: True if the item needs serialization, False otherwise</span>
+<span class="sd">    :rtype: bool</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">_seen</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">_seen</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+        
+    <span class="n">item_id</span> <span class="o">=</span> <span class="nb">id</span><span class="p">(</span><span class="n">item</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">item_id</span> <span class="ow">in</span> <span class="n">_seen</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="n">_seen</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">item_id</span><span class="p">)</span>
+
+    <span class="n">item_type</span> <span class="o">=</span> <span class="nb">type</span><span class="p">(</span><span class="n">item</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">item_type</span> <span class="ow">in</span> <span class="n">JSON_COMPATIBLE_TYPES</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+        
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">item</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)):</span>
+        <span class="n">results</span> <span class="o">=</span> <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span><span class="o">*</span><span class="p">[</span><span class="n">_needs_serialization</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">_seen</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">item</span><span class="p">])</span>
+        <span class="k">return</span> <span class="nb">any</span><span class="p">(</span><span class="n">results</span><span class="p">)</span>
+        
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">item</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+        <span class="n">results</span> <span class="o">=</span> <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span><span class="o">*</span><span class="p">[</span><span class="n">_needs_serialization</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">_seen</span><span class="p">)</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">item</span><span class="o">.</span><span class="n">values</span><span class="p">()])</span>
+        <span class="k">return</span> <span class="nb">any</span><span class="p">(</span><span class="n">results</span><span class="p">)</span>
+        
+    <span class="k">return</span> <span class="kc">True</span>
+
+
+<span class="k">def</span> <span class="nf">_get_serialization_type</span><span class="p">(</span><span class="n">item</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SerializationType</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Determine the serialization type for a given item.</span>
+
+<span class="sd">    :param item: The item to get serialization type for</span>
+<span class="sd">    :type item: Any</span>
+<span class="sd">    :return: The appropriate serialization type enum value</span>
+<span class="sd">    :rtype: SerializationType</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_get_type_category</span><span class="p">(</span><span class="nb">type</span><span class="p">(</span><span class="n">item</span><span class="p">))</span>
+
+
+<span class="k">async</span> <span class="k">def</span> <span class="nf">_serialize_item</span><span class="p">(</span><span class="n">item</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Any</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Serialize a single item based on its type.</span>
+
+<span class="sd">    :param item: The item to serialize</span>
+<span class="sd">    :type item: Any</span>
+<span class="sd">    :return: The serialized item or None if serialization fails</span>
+<span class="sd">    :rtype: Any</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="k">await</span> <span class="n">_needs_serialization</span><span class="p">(</span><span class="n">item</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">item</span>
+        
+    <span class="n">ser_type</span> <span class="o">=</span> <span class="n">_get_serialization_type</span><span class="p">(</span><span class="n">item</span><span class="p">)</span>
+    <span class="n">manager</span> <span class="o">=</span> <span class="n">ExecutorManager</span><span class="o">.</span><span class="n">get_instance</span><span class="p">()</span>
+    <span class="n">loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_event_loop</span><span class="p">()</span>
+    
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">ser_type</span> <span class="o">==</span> <span class="n">SerializationType</span><span class="o">.</span><span class="n">ARROW</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">item</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">10000</span><span class="p">:</span>
+                <span class="k">def</span> <span class="nf">serialize_arrow</span><span class="p">():</span>
+                    <span class="k">return</span> <span class="n">item</span><span class="o">.</span><span class="n">to_arrow</span><span class="p">()</span><span class="o">.</span><span class="n">serialize</span><span class="p">()</span><span class="o">.</span><span class="n">to_pybytes</span><span class="p">()</span>
+                
+                <span class="n">arrow_bytes</span> <span class="o">=</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span>
+                    <span class="n">manager</span><span class="o">.</span><span class="n">get_thread_pool</span><span class="p">(),</span>
+                    <span class="n">serialize_arrow</span>
+                <span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">def</span> <span class="nf">serialize_parquet</span><span class="p">():</span>
+                    <span class="n">buffer</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">BytesIO</span><span class="p">()</span>
+                    <span class="n">item</span><span class="o">.</span><span class="n">write_parquet</span><span class="p">(</span><span class="n">buffer</span><span class="p">,</span> <span class="n">compression</span><span class="o">=</span><span class="s2">&quot;zstd&quot;</span><span class="p">)</span>
+                    <span class="k">return</span> <span class="n">buffer</span><span class="o">.</span><span class="n">getvalue</span><span class="p">()</span>
+                
+                <span class="n">arrow_bytes</span> <span class="o">=</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span>
+                    <span class="n">manager</span><span class="o">.</span><span class="n">get_process_pool</span><span class="p">(),</span>
+                    <span class="n">serialize_parquet</span>
+                <span class="p">)</span>
+            
+            <span class="k">return</span> <span class="p">{</span>
+                <span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;arrow&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;data&#39;</span><span class="p">:</span> <span class="n">base64</span><span class="o">.</span><span class="n">b64encode</span><span class="p">(</span><span class="n">arrow_bytes</span><span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s1">&#39;ascii&#39;</span><span class="p">)</span>
+            <span class="p">}</span>
+            
+        <span class="k">elif</span> <span class="n">ser_type</span> <span class="o">==</span> <span class="n">SerializationType</span><span class="o">.</span><span class="n">NUMPY</span><span class="p">:</span>
+            <span class="k">def</span> <span class="nf">serialize_numpy</span><span class="p">():</span>
+                <span class="n">buffer</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">BytesIO</span><span class="p">()</span>
+                <span class="n">np</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">buffer</span><span class="p">,</span> <span class="n">item</span><span class="p">,</span> <span class="n">allow_pickle</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+                <span class="k">return</span> <span class="n">buffer</span><span class="o">.</span><span class="n">getvalue</span><span class="p">()</span>
+            
+            <span class="n">numpy_bytes</span> <span class="o">=</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span>
+                <span class="n">manager</span><span class="o">.</span><span class="n">get_thread_pool</span><span class="p">(),</span>
+                <span class="n">serialize_numpy</span>
+            <span class="p">)</span>
+            
+            <span class="k">return</span> <span class="p">{</span>
+                <span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;numpy&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;data&#39;</span><span class="p">:</span> <span class="n">base64</span><span class="o">.</span><span class="n">b64encode</span><span class="p">(</span><span class="n">numpy_bytes</span><span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s1">&#39;ascii&#39;</span><span class="p">)</span>
+            <span class="p">}</span>
+            
+        <span class="k">elif</span> <span class="n">ser_type</span> <span class="o">==</span> <span class="n">SerializationType</span><span class="o">.</span><span class="n">IMAGE</span><span class="p">:</span>
+            <span class="k">def</span> <span class="nf">serialize_image</span><span class="p">():</span>
+                <span class="n">buffer</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">BytesIO</span><span class="p">()</span>
+                <span class="n">item</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">buffer</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;PNG&#39;</span><span class="p">,</span> <span class="n">optimize</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                <span class="k">return</span> <span class="n">buffer</span><span class="o">.</span><span class="n">getvalue</span><span class="p">()</span>
+            
+            <span class="n">image_bytes</span> <span class="o">=</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span>
+                <span class="n">manager</span><span class="o">.</span><span class="n">get_thread_pool</span><span class="p">(),</span>
+                <span class="n">serialize_image</span>
+            <span class="p">)</span>
+            
+            <span class="k">return</span> <span class="p">{</span>
+                <span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;image&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;data&#39;</span><span class="p">:</span> <span class="n">base64</span><span class="o">.</span><span class="n">b64encode</span><span class="p">(</span><span class="n">image_bytes</span><span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s1">&#39;ascii&#39;</span><span class="p">)</span>
+            <span class="p">}</span>
+            
+        <span class="k">elif</span> <span class="n">ser_type</span> <span class="o">==</span> <span class="n">SerializationType</span><span class="o">.</span><span class="n">PLOTLY</span><span class="p">:</span>
+            <span class="k">def</span> <span class="nf">serialize_plotly</span><span class="p">():</span>
+                <span class="n">fig_dict</span> <span class="o">=</span> <span class="n">item</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span>
+                <span class="k">return</span> <span class="n">get_compressor</span><span class="p">()</span><span class="o">.</span><span class="n">compress</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">fig_dict</span><span class="p">))</span>
+            
+            <span class="n">plotly_bytes</span> <span class="o">=</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span>
+                <span class="n">manager</span><span class="o">.</span><span class="n">get_thread_pool</span><span class="p">(),</span>
+                <span class="n">serialize_plotly</span>
+            <span class="p">)</span>
+            
+            <span class="k">return</span> <span class="p">{</span>
+                <span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;plotly&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;data&#39;</span><span class="p">:</span> <span class="n">base64</span><span class="o">.</span><span class="n">b64encode</span><span class="p">(</span><span class="n">plotly_bytes</span><span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s1">&#39;ascii&#39;</span><span class="p">)</span>
+            <span class="p">}</span>
+            
+        <span class="k">elif</span> <span class="n">ser_type</span> <span class="o">==</span> <span class="n">SerializationType</span><span class="o">.</span><span class="n">MSGPACK</span><span class="p">:</span>
+            <span class="k">def</span> <span class="nf">serialize_msgpack</span><span class="p">():</span>
+                <span class="n">packed</span> <span class="o">=</span> <span class="n">msgpack</span><span class="o">.</span><span class="n">packb</span><span class="p">(</span><span class="n">item</span><span class="p">,</span> <span class="n">use_bin_type</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                <span class="k">return</span> <span class="n">get_compressor</span><span class="p">()</span><span class="o">.</span><span class="n">compress</span><span class="p">(</span><span class="n">packed</span><span class="p">)</span>
+            
+            <span class="n">msgpack_bytes</span> <span class="o">=</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span>
+                <span class="n">manager</span><span class="o">.</span><span class="n">get_thread_pool</span><span class="p">(),</span>
+                <span class="n">serialize_msgpack</span>
+            <span class="p">)</span>
+            
+            <span class="k">return</span> <span class="p">{</span>
+                <span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;msgpack&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;data&#39;</span><span class="p">:</span> <span class="n">base64</span><span class="o">.</span><span class="n">b64encode</span><span class="p">(</span><span class="n">msgpack_bytes</span><span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s1">&#39;ascii&#39;</span><span class="p">)</span>
+            <span class="p">}</span>
+            
+        <span class="k">elif</span> <span class="n">ser_type</span> <span class="o">==</span> <span class="n">SerializationType</span><span class="o">.</span><span class="n">PICKLE</span><span class="p">:</span>
+            <span class="k">def</span> <span class="nf">serialize_pickle</span><span class="p">():</span>
+                <span class="n">pickled</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">item</span><span class="p">,</span> <span class="n">protocol</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
+                <span class="k">return</span> <span class="n">get_compressor</span><span class="p">()</span><span class="o">.</span><span class="n">compress</span><span class="p">(</span><span class="n">pickled</span><span class="p">)</span>
+            
+            <span class="n">pickle_bytes</span> <span class="o">=</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span>
+                <span class="n">manager</span><span class="o">.</span><span class="n">get_process_pool</span><span class="p">(),</span>
+                <span class="n">serialize_pickle</span>
+            <span class="p">)</span>
+            
+            <span class="k">return</span> <span class="p">{</span>
+                <span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;pickle&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;data&#39;</span><span class="p">:</span> <span class="n">base64</span><span class="o">.</span><span class="n">b64encode</span><span class="p">(</span><span class="n">pickle_bytes</span><span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s1">&#39;ascii&#39;</span><span class="p">)</span>
+            <span class="p">}</span>
+            
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed to serialize item of type </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">item</span><span class="p">)</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span>
+
+
+<div class="viewcode-block" id="serialize_metadata">
+<a class="viewcode-back" href="../../utils/index.html#utils.serialization.serialize_metadata">[docs]</a>
+<span class="k">async</span> <span class="k">def</span> <span class="nf">serialize_metadata</span><span class="p">(</span>
+    <span class="n">response_metadata</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">],</span> 
+    <span class="n">end_state</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Serialize metadata dictionary containing various data types.</span>
+<span class="sd">    </span>
+<span class="sd">    :param response_metadata: Dictionary containing metadata to serialize</span>
+<span class="sd">    :type response_metadata: Dict[str, Any]</span>
+<span class="sd">    :param end_state: Whether this is the final state</span>
+<span class="sd">    :type end_state: bool, optional</span>
+<span class="sd">    :return: Dictionary containing serialized data</span>
+<span class="sd">    :rtype: Dict[str, Any]</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">serialized_data</span> <span class="o">=</span> <span class="p">{}</span>
+    
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">items_to_process</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span> <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">response_metadata</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+            <span class="k">if</span> <span class="k">await</span> <span class="n">_needs_serialization</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+        <span class="p">]</span>
+        
+        <span class="k">if</span> <span class="n">items_to_process</span><span class="p">:</span>
+            <span class="n">results</span> <span class="o">=</span> <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span><span class="o">*</span><span class="p">[</span>
+                <span class="n">_serialize_item</span><span class="p">(</span><span class="n">value</span><span class="p">)</span> <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">items_to_process</span>
+            <span class="p">])</span>
+            
+            <span class="k">for</span> <span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">_</span><span class="p">),</span> <span class="n">result</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">items_to_process</span><span class="p">,</span> <span class="n">results</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">result</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">serialized_data</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">result</span>
+                    
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed to serialize items: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        
+    <span class="k">return</span> <span class="n">serialized_data</span></div>
+
+
+
+<span class="k">async</span> <span class="k">def</span> <span class="nf">_unserialize_item</span><span class="p">(</span><span class="n">item</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Any</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Unserialize a single item based on its type.</span>
+
+<span class="sd">    :param item: The serialized item to unserialize</span>
+<span class="sd">    :type item: Any</span>
+<span class="sd">    :return: The unserialized item or None if unserialization fails</span>
+<span class="sd">    :rtype: Any</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">item</span><span class="p">,</span> <span class="nb">dict</span><span class="p">)</span> <span class="ow">or</span> <span class="s1">&#39;type&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">item</span> <span class="ow">or</span> <span class="s1">&#39;data&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">item</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">item</span>
+            
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">binary_data</span> <span class="o">=</span> <span class="n">base64</span><span class="o">.</span><span class="n">b64decode</span><span class="p">(</span><span class="n">item</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">])</span>
+        <span class="n">manager</span> <span class="o">=</span> <span class="n">ExecutorManager</span><span class="o">.</span><span class="n">get_instance</span><span class="p">()</span>
+        <span class="n">loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_event_loop</span><span class="p">()</span>
+        
+        <span class="k">if</span> <span class="n">item</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;arrow&#39;</span><span class="p">:</span>
+            <span class="k">def</span> <span class="nf">unserialize_arrow</span><span class="p">():</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">binary_data</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">1_000_000</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="n">pl</span><span class="o">.</span><span class="n">from_arrow</span><span class="p">(</span><span class="n">pa</span><span class="o">.</span><span class="n">ipc</span><span class="o">.</span><span class="n">read_message</span><span class="p">(</span><span class="n">binary_data</span><span class="p">)</span><span class="o">.</span><span class="n">body</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="n">pl</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">io</span><span class="o">.</span><span class="n">BytesIO</span><span class="p">(</span><span class="n">binary_data</span><span class="p">))</span>
+            
+            <span class="k">return</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span>
+                <span class="n">manager</span><span class="o">.</span><span class="n">get_thread_pool</span><span class="p">(),</span>
+                <span class="n">unserialize_arrow</span>
+            <span class="p">)</span>
+            
+        <span class="k">elif</span> <span class="n">item</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;plotly&#39;</span><span class="p">:</span>
+            <span class="k">def</span> <span class="nf">unserialize_plotly</span><span class="p">():</span>
+                <span class="k">return</span> <span class="n">go</span><span class="o">.</span><span class="n">Figure</span><span class="p">(</span>
+                    <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span>
+                        <span class="n">get_decompressor</span><span class="p">()</span><span class="o">.</span><span class="n">decompress</span><span class="p">(</span><span class="n">binary_data</span><span class="p">)</span>
+                    <span class="p">)</span>
+                <span class="p">)</span>
+            
+            <span class="k">return</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span>
+                <span class="n">manager</span><span class="o">.</span><span class="n">get_thread_pool</span><span class="p">(),</span>
+                <span class="n">unserialize_plotly</span>
+            <span class="p">)</span>
+            
+        <span class="k">elif</span> <span class="n">item</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;msgpack&#39;</span><span class="p">:</span>
+            <span class="k">def</span> <span class="nf">unserialize_msgpack</span><span class="p">():</span>
+                <span class="k">return</span> <span class="n">msgpack</span><span class="o">.</span><span class="n">unpackb</span><span class="p">(</span>
+                    <span class="n">get_decompressor</span><span class="p">()</span><span class="o">.</span><span class="n">decompress</span><span class="p">(</span><span class="n">binary_data</span><span class="p">),</span>
+                    <span class="n">raw</span><span class="o">=</span><span class="kc">False</span>
+                <span class="p">)</span>
+            
+            <span class="k">return</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span>
+                <span class="n">manager</span><span class="o">.</span><span class="n">get_thread_pool</span><span class="p">(),</span>
+                <span class="n">unserialize_msgpack</span>
+            <span class="p">)</span>
+            
+        <span class="k">elif</span> <span class="n">item</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;pickle&#39;</span><span class="p">:</span>
+            <span class="k">def</span> <span class="nf">unserialize_pickle</span><span class="p">():</span>
+                <span class="k">return</span> <span class="n">pickle</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span>
+                    <span class="n">get_decompressor</span><span class="p">()</span><span class="o">.</span><span class="n">decompress</span><span class="p">(</span><span class="n">binary_data</span><span class="p">)</span>
+                <span class="p">)</span>
+            
+            <span class="k">return</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span>
+                <span class="n">manager</span><span class="o">.</span><span class="n">get_process_pool</span><span class="p">(),</span>
+                <span class="n">unserialize_pickle</span>
+            <span class="p">)</span>
+            
+        <span class="k">elif</span> <span class="n">item</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;numpy&#39;</span><span class="p">:</span>
+            <span class="k">def</span> <span class="nf">unserialize_numpy</span><span class="p">():</span>
+                <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">io</span><span class="o">.</span><span class="n">BytesIO</span><span class="p">(</span><span class="n">binary_data</span><span class="p">),</span> <span class="n">allow_pickle</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+            
+            <span class="k">return</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span>
+                <span class="n">manager</span><span class="o">.</span><span class="n">get_thread_pool</span><span class="p">(),</span>
+                <span class="n">unserialize_numpy</span>
+            <span class="p">)</span>
+            
+        <span class="k">elif</span> <span class="n">item</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;image&#39;</span><span class="p">:</span>
+            <span class="k">def</span> <span class="nf">unserialize_image</span><span class="p">():</span>
+                <span class="k">return</span> <span class="n">Image</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">io</span><span class="o">.</span><span class="n">BytesIO</span><span class="p">(</span><span class="n">binary_data</span><span class="p">))</span>
+            
+            <span class="k">return</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span>
+                <span class="n">manager</span><span class="o">.</span><span class="n">get_thread_pool</span><span class="p">(),</span>
+                <span class="n">unserialize_image</span>
+            <span class="p">)</span>
+            
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed to unserialize item: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    
+    <span class="k">return</span> <span class="n">item</span>
+
+
+<div class="viewcode-block" id="unserialize_metadata">
+<a class="viewcode-back" href="../../utils/index.html#utils.serialization.unserialize_metadata">[docs]</a>
+<span class="k">async</span> <span class="k">def</span> <span class="nf">unserialize_metadata</span><span class="p">(</span><span class="n">response_metadata</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Unserialize metadata dictionary containing various data types.</span>
+<span class="sd">    </span>
+<span class="sd">    :param response_metadata: Dictionary containing serialized metadata</span>
+<span class="sd">    :type response_metadata: Dict[str, Any]</span>
+<span class="sd">    :return: Dictionary containing unserialized data</span>
+<span class="sd">    :rtype: Dict[str, Any]</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">items_to_process</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span> <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">response_metadata</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="nb">dict</span><span class="p">)</span> <span class="ow">and</span> <span class="s1">&#39;type&#39;</span> <span class="ow">in</span> <span class="n">value</span> <span class="ow">and</span> <span class="s1">&#39;data&#39;</span> <span class="ow">in</span> <span class="n">value</span>
+        <span class="p">]</span>
+        
+        <span class="k">if</span> <span class="n">items_to_process</span><span class="p">:</span>
+            <span class="n">results</span> <span class="o">=</span> <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span><span class="o">*</span><span class="p">[</span>
+                <span class="n">_unserialize_item</span><span class="p">(</span><span class="n">value</span><span class="p">)</span> <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">items_to_process</span>
+            <span class="p">])</span>
+            
+            <span class="k">return</span> <span class="p">{</span>
+                <span class="n">key</span><span class="p">:</span> <span class="n">result</span> <span class="k">if</span> <span class="n">result</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">value</span>
+                <span class="k">for</span> <span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">),</span> <span class="n">result</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">items_to_process</span><span class="p">,</span> <span class="n">results</span><span class="p">)</span>
+            <span class="p">}</span>
+            
+        <span class="k">return</span> <span class="n">response_metadata</span>
+                    
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed to unserialize items: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">{}</span></div>
+
+
+
+<span class="nd">@contextlib</span><span class="o">.</span><span class="n">asynccontextmanager</span>
+<span class="k">async</span> <span class="k">def</span> <span class="nf">serialization_context</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Context manager for managing serialization resources.</span>
+<span class="sd">    </span>
+<span class="sd">    Ensures proper cleanup of executor pools after serialization operations.</span>
+<span class="sd">    </span>
+<span class="sd">    :yield: Nothing</span>
+<span class="sd">    :rtype: None</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">manager</span> <span class="o">=</span> <span class="n">ExecutorManager</span><span class="o">.</span><span class="n">get_instance</span><span class="p">()</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">yield</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">manager</span><span class="o">.</span><span class="n">cleanup</span><span class="p">()</span>
+
+
+<span class="k">async</span> <span class="k">def</span> <span class="nf">_deserialize_item</span><span class="p">(</span><span class="n">serialized_data</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Any</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Deserialize a single item based on its type tag.</span>
+<span class="sd">    </span>
+<span class="sd">    :param serialized_data: Dictionary containing type and serialized data</span>
+<span class="sd">    :type serialized_data: Dict[str, Any]</span>
+<span class="sd">    :return: Deserialized object</span>
+<span class="sd">    :rtype: Any</span>
+<span class="sd">    :raises ValueError: If deserialization fails</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">serialized_data</span><span class="p">,</span> <span class="nb">dict</span><span class="p">)</span> <span class="ow">or</span> <span class="s1">&#39;type&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">serialized_data</span> <span class="ow">or</span> <span class="s1">&#39;data&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">serialized_data</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">serialized_data</span>
+            
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">binary_data</span> <span class="o">=</span> <span class="n">base64</span><span class="o">.</span><span class="n">b64decode</span><span class="p">(</span><span class="n">serialized_data</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">])</span>
+        <span class="n">loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_running_loop</span><span class="p">()</span>
+        
+        <span class="k">if</span> <span class="n">serialized_data</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;arrow&#39;</span><span class="p">:</span>
+            <span class="k">def</span> <span class="nf">deserialize_arrow</span><span class="p">():</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">binary_data</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">1_000_000</span><span class="p">:</span>
+                    <span class="c1"># For smaller datasets, use Arrow IPC</span>
+                    <span class="n">table</span> <span class="o">=</span> <span class="n">pa</span><span class="o">.</span><span class="n">ipc</span><span class="o">.</span><span class="n">read_message</span><span class="p">(</span><span class="n">binary_data</span><span class="p">)</span><span class="o">.</span><span class="n">body</span>
+                    <span class="k">return</span> <span class="n">pl</span><span class="o">.</span><span class="n">from_arrow</span><span class="p">(</span><span class="n">table</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="c1"># For larger datasets, use Parquet</span>
+                    <span class="n">buffer</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">BytesIO</span><span class="p">(</span><span class="n">binary_data</span><span class="p">)</span>
+                    <span class="k">return</span> <span class="n">pl</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">buffer</span><span class="p">)</span>
+            
+            <span class="k">return</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span>
+                <span class="kc">None</span><span class="p">,</span>
+                <span class="n">deserialize_arrow</span>
+            <span class="p">)</span>
+            
+        <span class="k">elif</span> <span class="n">serialized_data</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;plotly&#39;</span><span class="p">:</span>
+            <span class="k">def</span> <span class="nf">deserialize_plotly</span><span class="p">():</span>
+                <span class="n">decompressed</span> <span class="o">=</span> <span class="n">get_decompressor</span><span class="p">()</span><span class="o">.</span><span class="n">decompress</span><span class="p">(</span><span class="n">binary_data</span><span class="p">)</span>
+                <span class="n">fig_dict</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">decompressed</span><span class="p">)</span>
+                <span class="k">return</span> <span class="n">go</span><span class="o">.</span><span class="n">Figure</span><span class="p">(</span><span class="n">fig_dict</span><span class="p">)</span>
+            
+            <span class="k">return</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span>
+                <span class="kc">None</span><span class="p">,</span>
+                <span class="n">deserialize_plotly</span>
+            <span class="p">)</span>
+            
+        <span class="k">elif</span> <span class="n">serialized_data</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;numpy&#39;</span><span class="p">:</span>
+            <span class="k">def</span> <span class="nf">deserialize_numpy</span><span class="p">():</span>
+                <span class="n">buffer</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">BytesIO</span><span class="p">(</span><span class="n">binary_data</span><span class="p">)</span>
+                <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">buffer</span><span class="p">,</span> <span class="n">allow_pickle</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+            
+            <span class="k">return</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span>
+                <span class="kc">None</span><span class="p">,</span>
+                <span class="n">deserialize_numpy</span>
+            <span class="p">)</span>
+            
+        <span class="k">elif</span> <span class="n">serialized_data</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;image&#39;</span><span class="p">:</span>
+            <span class="k">def</span> <span class="nf">deserialize_image</span><span class="p">():</span>
+                <span class="n">buffer</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">BytesIO</span><span class="p">(</span><span class="n">binary_data</span><span class="p">)</span>
+                <span class="k">return</span> <span class="n">Image</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">buffer</span><span class="p">)</span>
+            
+            <span class="k">return</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span>
+                <span class="kc">None</span><span class="p">,</span>
+                <span class="n">deserialize_image</span>
+            <span class="p">)</span>
+            
+        <span class="k">elif</span> <span class="n">serialized_data</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;msgpack&#39;</span><span class="p">:</span>
+            <span class="k">def</span> <span class="nf">deserialize_msgpack</span><span class="p">():</span>
+                <span class="n">decompressed</span> <span class="o">=</span> <span class="n">get_decompressor</span><span class="p">()</span><span class="o">.</span><span class="n">decompress</span><span class="p">(</span><span class="n">binary_data</span><span class="p">)</span>
+                <span class="k">return</span> <span class="n">msgpack</span><span class="o">.</span><span class="n">unpackb</span><span class="p">(</span><span class="n">decompressed</span><span class="p">,</span> <span class="n">raw</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+            
+            <span class="k">return</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span>
+                <span class="kc">None</span><span class="p">,</span>
+                <span class="n">deserialize_msgpack</span>
+            <span class="p">)</span>
+            
+        <span class="k">elif</span> <span class="n">serialized_data</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;pickle&#39;</span><span class="p">:</span>
+            <span class="k">def</span> <span class="nf">deserialize_pickle</span><span class="p">():</span>
+                <span class="n">decompressed</span> <span class="o">=</span> <span class="n">get_decompressor</span><span class="p">()</span><span class="o">.</span><span class="n">decompress</span><span class="p">(</span><span class="n">binary_data</span><span class="p">)</span>
+                <span class="k">return</span> <span class="n">pickle</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">decompressed</span><span class="p">)</span>
+            
+            <span class="k">return</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span>
+                <span class="kc">None</span><span class="p">,</span>
+                <span class="n">deserialize_pickle</span>
+            <span class="p">)</span>
+            
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unknown serialization type: </span><span class="si">{</span><span class="n">serialized_data</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed to deserialize </span><span class="si">{</span><span class="n">serialized_data</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> data: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="deserialize_metadata">
+<a class="viewcode-back" href="../../utils/index.html#utils.serialization.deserialize_metadata">[docs]</a>
+<span class="k">async</span> <span class="k">def</span> <span class="nf">deserialize_metadata</span><span class="p">(</span><span class="n">serialized_data</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Deserialize metadata dictionary containing various data types.</span>
+<span class="sd">    </span>
+<span class="sd">    :param serialized_data: Dictionary containing serialized metadata</span>
+<span class="sd">    :type serialized_data: Dict[str, Any]</span>
+<span class="sd">    :return: Dictionary containing deserialized data</span>
+<span class="sd">    :rtype: Dict[str, Any]</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">items_to_process</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span> <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">serialized_data</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="nb">dict</span><span class="p">)</span> <span class="ow">and</span> <span class="s1">&#39;type&#39;</span> <span class="ow">in</span> <span class="n">value</span> <span class="ow">and</span> <span class="s1">&#39;data&#39;</span> <span class="ow">in</span> <span class="n">value</span>
+        <span class="p">]</span>
+        
+        <span class="k">if</span> <span class="n">items_to_process</span><span class="p">:</span>
+            <span class="n">results</span> <span class="o">=</span> <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span><span class="o">*</span><span class="p">[</span>
+                <span class="n">_deserialize_item</span><span class="p">(</span><span class="n">value</span><span class="p">)</span> <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">items_to_process</span>
+            <span class="p">])</span>
+            
+            <span class="k">return</span> <span class="p">{</span>
+                <span class="n">key</span><span class="p">:</span> <span class="n">result</span> <span class="k">if</span> <span class="n">result</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">value</span>
+                <span class="k">for</span> <span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">),</span> <span class="n">result</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">items_to_process</span><span class="p">,</span> <span class="n">results</span><span class="p">)</span>
+            <span class="p">}</span>
+            
+        <span class="k">return</span> <span class="n">serialized_data</span>
+                    
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed to deserialize items: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">{}</span></div>
+
+
+
+<div class="viewcode-block" id="serialization_context">
+<a class="viewcode-back" href="../../utils/index.html#utils.serialization.serialization_context">[docs]</a>
+<span class="nd">@contextlib</span><span class="o">.</span><span class="n">asynccontextmanager</span>
+<span class="k">async</span> <span class="k">def</span> <span class="nf">serialization_context</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Context manager for managing serialization resources.</span>
+<span class="sd">    </span>
+<span class="sd">    Ensures proper cleanup of executor pools after serialization operations.</span>
+<span class="sd">    </span>
+<span class="sd">    :yield: None</span>
+<span class="sd">    :rtype: None</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">manager</span> <span class="o">=</span> <span class="n">ExecutorManager</span><span class="o">.</span><span class="n">get_instance</span><span class="p">()</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">yield</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">manager</span><span class="o">.</span><span class="n">cleanup</span><span class="p">()</span></div>
+
+
+
+<div class="viewcode-block" id="serialize_and_compress">
+<a class="viewcode-back" href="../../utils/index.html#utils.serialization.serialize_and_compress">[docs]</a>
+<span class="k">async</span> <span class="k">def</span> <span class="nf">serialize_and_compress</span><span class="p">(</span><span class="n">data</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bytes</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Serialize and compress data in a format-aware way.</span>
+<span class="sd">    </span>
+<span class="sd">    :param data: Data to serialize and compress</span>
+<span class="sd">    :type data: Any</span>
+<span class="sd">    :return: Compressed serialized data</span>
+<span class="sd">    :rtype: bytes</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_running_loop</span><span class="p">()</span>
+    
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">):</span>
+        <span class="k">return</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span>
+            <span class="k">lambda</span><span class="p">:</span> <span class="n">data</span><span class="o">.</span><span class="n">to_arrow</span><span class="p">()</span><span class="o">.</span><span class="n">serialize</span><span class="p">()</span><span class="o">.</span><span class="n">to_pybytes</span><span class="p">()</span>
+        <span class="p">)</span>
+    
+    <span class="c1"># Default to msgpack for other types</span>
+    <span class="k">return</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span>
+        <span class="k">lambda</span><span class="p">:</span> <span class="n">get_compressor</span><span class="p">()</span><span class="o">.</span><span class="n">compress</span><span class="p">(</span>
+            <span class="n">msgpack</span><span class="o">.</span><span class="n">packb</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">use_bin_type</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="p">)</span>
+    <span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="decompress_and_deserialize">
+<a class="viewcode-back" href="../../utils/index.html#utils.serialization.decompress_and_deserialize">[docs]</a>
+<span class="k">async</span> <span class="k">def</span> <span class="nf">decompress_and_deserialize</span><span class="p">(</span><span class="n">data</span><span class="p">:</span> <span class="nb">bytes</span><span class="p">,</span> <span class="n">expected_type</span><span class="p">:</span> <span class="n">Type</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Any</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Decompress and deserialize data with type checking.</span>
+<span class="sd">    </span>
+<span class="sd">    :param data: Compressed serialized data</span>
+<span class="sd">    :type data: bytes</span>
+<span class="sd">    :param expected_type: Expected type of deserialized data</span>
+<span class="sd">    :type expected_type: Type, optional</span>
+<span class="sd">    :return: Deserialized data</span>
+<span class="sd">    :rtype: Any</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_running_loop</span><span class="p">()</span>
+    
+    <span class="k">if</span> <span class="n">expected_type</span> <span class="o">==</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+        <span class="n">df</span> <span class="o">=</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span>
+            <span class="k">lambda</span><span class="p">:</span> <span class="n">pl</span><span class="o">.</span><span class="n">from_arrow</span><span class="p">(</span><span class="n">pa</span><span class="o">.</span><span class="n">ipc</span><span class="o">.</span><span class="n">read_message</span><span class="p">(</span><span class="n">data</span><span class="p">)</span><span class="o">.</span><span class="n">body</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">df</span>
+    
+    <span class="c1"># Default msgpack deserialization</span>
+    <span class="n">decompressed</span> <span class="o">=</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span>
+        <span class="k">lambda</span><span class="p">:</span> <span class="n">get_decompressor</span><span class="p">()</span><span class="o">.</span><span class="n">decompress</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+    <span class="p">)</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span>
+        <span class="k">lambda</span><span class="p">:</span> <span class="n">msgpack</span><span class="o">.</span><span class="n">unpackb</span><span class="p">(</span><span class="n">decompressed</span><span class="p">,</span> <span class="n">raw</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="p">)</span>
+    
+    <span class="k">if</span> <span class="n">expected_type</span> <span class="ow">and</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="n">expected_type</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Expected </span><span class="si">{</span><span class="n">expected_type</span><span class="si">}</span><span class="s2">, got </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">result</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        
+    <span class="k">return</span> <span class="n">result</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, Christian de Frondeville.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

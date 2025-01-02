@@ -1,0 +1,197 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>llm.inference.gemini.sync_inference &mdash; Flux 0.2 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../_static/documentation_options.js?v=10f1778b"></script>
+      <script src="../../../../_static/doctools.js?v=9a2dae69"></script>
+      <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            Flux
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Core Components</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../agents/index.html">Agents</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../llm/index.html">Language Models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../utils/index.html">Utilities</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../tests/index.html">Tests</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">Flux</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">llm.inference.gemini.sync_inference</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for llm.inference.gemini.sync_inference</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Synchronous inference module for Google&#39;s Gemini API.</span>
+
+<span class="sd">This module provides synchronous functions for interacting with Gemini models,</span>
+<span class="sd">handling model initialization and inference with thread-safe caching.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">from</span> <span class="nn">functools</span> <span class="kn">import</span> <span class="n">lru_cache</span>
+<span class="kn">import</span> <span class="nn">threading</span>
+
+
+<span class="n">_model_lock</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Lock for thread-safe model initialization.</span>
+
+<span class="sd">:ivar _model_lock: Threading lock for synchronizing model initialization</span>
+<span class="sd">:type _model_lock: threading.Lock</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+
+<span class="nd">@lru_cache</span><span class="p">(</span><span class="n">maxsize</span> <span class="o">=</span> <span class="mi">32</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">_initialize_model</span><span class="p">(</span>
+    <span class="n">model_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> 
+    <span class="n">temperature</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> 
+    <span class="n">max_tokens</span><span class="p">:</span> <span class="nb">int</span>
+<span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Initialize and cache a Gemini model with specific configuration.</span>
+<span class="sd">    </span>
+<span class="sd">    :param model_name: Name of the Gemini model to initialize</span>
+<span class="sd">    :type model_name: str</span>
+<span class="sd">    :param temperature: Sampling temperature for generation</span>
+<span class="sd">    :type temperature: float</span>
+<span class="sd">    :param max_tokens: Maximum number of tokens in response</span>
+<span class="sd">    :type max_tokens: int</span>
+<span class="sd">    :return: Tuple of model instance and generation config</span>
+<span class="sd">    :rtype: Tuple[genai.GenerativeModel, genai.GenerationConfig]</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span> <span class="nn">google.generativeai</span> <span class="k">as</span> <span class="nn">genai</span>
+    
+    <span class="n">genai</span><span class="o">.</span><span class="n">configure</span><span class="p">(</span><span class="n">api_key</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s1">&#39;GEMINI_API_KEY&#39;</span><span class="p">))</span>
+    <span class="n">generation_model</span> <span class="o">=</span> <span class="n">genai</span><span class="o">.</span><span class="n">GenerativeModel</span><span class="p">(</span><span class="n">model_name</span> <span class="o">=</span> <span class="n">model_name</span><span class="p">)</span>
+    
+    <span class="n">generation_config</span> <span class="o">=</span> <span class="n">genai</span><span class="o">.</span><span class="n">GenerationConfig</span><span class="p">(</span>
+        <span class="n">temperature</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">temperature</span><span class="p">),</span>       
+        <span class="n">max_output_tokens</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">max_tokens</span><span class="p">)</span>
+    <span class="p">)</span>
+    
+    <span class="k">return</span> <span class="n">generation_model</span><span class="p">,</span> <span class="n">generation_config</span>
+
+
+<div class="viewcode-block" id="gemini_llm_inference">
+<a class="viewcode-back" href="../../../../llm/inference.html#llm.inference.gemini.sync_inference.gemini_llm_inference">[docs]</a>
+<span class="k">def</span> <span class="nf">gemini_llm_inference</span><span class="p">(</span>
+    <span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">model_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;gemini-1.5-flash&#39;</span><span class="p">,</span>
+    <span class="n">temperature</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.1</span><span class="p">,</span>
+    <span class="n">max_tokens</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">4_000</span><span class="p">,</span>
+    <span class="n">system_prompt</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Perform synchronous inference using Gemini API.</span>
+<span class="sd">    </span>
+<span class="sd">    :param query: Input text to send to the model</span>
+<span class="sd">    :type query: str</span>
+<span class="sd">    :param model_name: Name of the Gemini model to use</span>
+<span class="sd">    :type model_name: str</span>
+<span class="sd">    :param temperature: Sampling temperature</span>
+<span class="sd">    :type temperature: float</span>
+<span class="sd">    :param max_tokens: Maximum number of tokens in response</span>
+<span class="sd">    :type max_tokens: int</span>
+<span class="sd">    :param system_prompt: Optional system prompt to prepend</span>
+<span class="sd">    :type system_prompt: str</span>
+<span class="sd">    :return: Model&#39;s generated text response</span>
+<span class="sd">    :rtype: str</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">prompt</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">system_prompt</span><span class="si">}</span><span class="se">\n\n</span><span class="si">{</span><span class="n">query</span><span class="si">}</span><span class="s1">&#39;</span> <span class="k">if</span> <span class="n">system_prompt</span> <span class="k">else</span> <span class="n">query</span>
+    
+    <span class="k">with</span> <span class="n">_model_lock</span><span class="p">:</span>
+        <span class="n">generation_model</span><span class="p">,</span> <span class="n">generation_config</span> <span class="o">=</span> <span class="n">_initialize_model</span><span class="p">(</span>
+            <span class="n">model_name</span><span class="p">,</span>
+            <span class="n">temperature</span><span class="p">,</span>
+            <span class="n">max_tokens</span>
+        <span class="p">)</span>
+        
+        <span class="n">response</span> <span class="o">=</span> <span class="n">generation_model</span><span class="o">.</span><span class="n">generate_content</span><span class="p">(</span>
+            <span class="n">prompt</span><span class="p">,</span>
+            <span class="n">generation_config</span> <span class="o">=</span> <span class="n">generation_config</span>
+        <span class="p">)</span>
+    
+    <span class="k">return</span> <span class="n">response</span><span class="o">.</span><span class="n">text</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, Christian de Frondeville.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -1,0 +1,191 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Core Agent &mdash; Flux 0.2 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=10f1778b"></script>
+      <script src="../_static/doctools.js?v=9a2dae69"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Chat Agents" href="chat.html" />
+    <link rel="prev" title="Agents" href="index.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            Flux
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Core Components</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Agents</a><ul class="current">
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Core Agent</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#base-models">Base Models</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#agent-state">Agent State</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#agent-config">Agent Config</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#status">Status</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#logging">Logging</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#agent-implementation">Agent Implementation</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#module-agents.agent.models">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#base-agent">Base Agent</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#configuration">Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#message-handling">Message Handling</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#state-management">State Management</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#utilities">Utilities</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="chat.html">Chat Agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tools.html">Tool Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vectorstore.html">Vector Store</a></li>
+<li class="toctree-l2"><a class="reference internal" href="monitor.html">Monitoring</a></li>
+<li class="toctree-l2"><a class="reference internal" href="messages.html">Message Components</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#core-components">Core Components</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#base-models">Base Models</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../llm/index.html">Language Models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../utils/index.html">Utilities</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tests/index.html">Tests</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">Flux</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="index.html">Agents</a></li>
+      <li class="breadcrumb-item active">Core Agent</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/agents/core.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-agents.models">
+<span id="core-agent"></span><h1>Core Agent<a class="headerlink" href="#module-agents.models" title="Link to this heading"></a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading"></a></h2>
+<p>This module provides base models for agent configuration, state management,
+and file handling with support for both synchronous and asynchronous operations.</p>
+</section>
+<section id="base-models">
+<h2>Base Models<a class="headerlink" href="#base-models" title="Link to this heading"></a></h2>
+<section id="agent-state">
+<h3>Agent State<a class="headerlink" href="#agent-state" title="Link to this heading"></a></h3>
+</section>
+<section id="agent-config">
+<h3>Agent Config<a class="headerlink" href="#agent-config" title="Link to this heading"></a></h3>
+</section>
+<section id="status">
+<h3>Status<a class="headerlink" href="#status" title="Link to this heading"></a></h3>
+</section>
+<section id="logging">
+<h3>Logging<a class="headerlink" href="#logging" title="Link to this heading"></a></h3>
+</section>
+</section>
+<section id="agent-implementation">
+<h2>Agent Implementation<a class="headerlink" href="#agent-implementation" title="Link to this heading"></a></h2>
+<section id="module-agents.agent.models">
+<span id="id1"></span><h3>Overview<a class="headerlink" href="#module-agents.agent.models" title="Link to this heading"></a></h3>
+<p>The agent module provides the base Agent class and related utilities for building
+and managing agents in the system. It includes functionality for:</p>
+<ul class="simple">
+<li><p>Agent state and configuration management</p></li>
+<li><p>Message handling and communication</p></li>
+<li><p>LLM integration</p></li>
+<li><p>Logging and monitoring</p></li>
+</ul>
+</section>
+<section id="base-agent">
+<h3>Base Agent<a class="headerlink" href="#base-agent" title="Link to this heading"></a></h3>
+</section>
+<section id="configuration">
+<h3>Configuration<a class="headerlink" href="#configuration" title="Link to this heading"></a></h3>
+</section>
+</section>
+<section id="message-handling">
+<h2>Message Handling<a class="headerlink" href="#message-handling" title="Link to this heading"></a></h2>
+</section>
+<section id="state-management">
+<h2>State Management<a class="headerlink" href="#state-management" title="Link to this heading"></a></h2>
+</section>
+<section id="utilities">
+<h2>Utilities<a class="headerlink" href="#utilities" title="Link to this heading"></a></h2>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="index.html" class="btn btn-neutral float-left" title="Agents" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="chat.html" class="btn btn-neutral float-right" title="Chat Agents" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, Christian de Frondeville.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

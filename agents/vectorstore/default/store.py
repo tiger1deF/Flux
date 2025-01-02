@@ -4,25 +4,25 @@ HNSW vector store implementation for efficient local embeddings.
 This module provides a concrete implementation of BaseVectorStore using HNSW
 (Hierarchical Navigable Small World) graphs for fast approximate nearest neighbor search.
 """
-
 from typing import List, Dict, Any, Optional, Union
 from pathlib import Path
 import numpy as np
 import hnswlib
-import os
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import contextvars
 from threading import Lock
-import orjson
+import json
+import aiofiles
 
 from agents.vectorstore.models import BaseVectorStore
 
-from llm import BaseEmbeddingFunction, base_local_embedder
+from llm import BaseEmbeddingFunction
 
-from agents.messages.message import Message
-from agents.messages.file import File
-from agents.messages.metadata import Metadata
+from agents.storage.message import Message
+from agents.storage.file import File
+from agents.storage.context import Context
+from agents.storage.models import Chunk
 
 
 class ContextAwareThreadPoolExecutor(ThreadPoolExecutor):
@@ -46,71 +46,63 @@ class HNSWStore(BaseVectorStore):
     """
     Vector store implementation using HNSW algorithm for efficient similarity search.
     
-    :ivar dim: Dimensionality of the embedding space
-    :type dim: int
     :ivar max_elements: Maximum number of elements in the index
     :type max_elements: int
-    :ivar internal_embed: Function for generating embeddings
-    :type internal_embed: BaseEmbeddingFunction
+    :ivar embedding_function: Function for generating embeddings
+    :type embedding_function: BaseEmbeddingFunction
     :ivar index: HNSW index for similarity search
     :type index: hnswlib.Index
-    :ivar metadata: Storage for element metadata
-    :type metadata: Dict[int, Dict[str, Any]]
+    :ivar data: Storage for element metadata
+    :type data: Dict[int, Any]
     """
     
     _instance_lock = Lock()
     _executor = None
-
+    embedding_function: BaseEmbeddingFunction = None
+    max_elements: int = 100_000
+    
     def __init__(
         self,
-        embedding_function: Optional[BaseEmbeddingFunction] = base_local_embedder,
-        max_elements: int = 100_000,
+        embedding_function: Optional[BaseEmbeddingFunction] = None,
         ef_construction: int = 1000,
         M: int = 128,
         allow_replace_deleted: bool = False,
+        lazy_indexing: bool = False
     ):
         """
         Initialize HNSW vector store.
         
         :param embedding_function: Function to generate embeddings
-        :type embedding_function: Optional[BaseEmbeddingFunction]
-        :param max_elements: Maximum number of elements in index
-        :type max_elements: int
-        :param ef_construction: Size of dynamic candidate list for construction
-        :type ef_construction: int
-        :param M: Number of bi-directional links created for each element
-        :type M: int
+        :param ef_construction: Size of dynamic list for construction
+        :param M: Number of bi-directional links created for every new element
         :param allow_replace_deleted: Whether to allow replacing deleted elements
-        :type allow_replace_deleted: bool
+        :param lazy_indexing: Whether to enable lazy indexing of chunks
         """
-        super().__init__()
+        super().__init__(embedding_function = embedding_function)
         
-        self.dim = embedding_function.dimension
-        self.max_elements = max_elements
-        
-        self.internal_embed = embedding_function
-        
+        if not embedding_function or not embedding_function.dimension:
+            raise ValueError("Embedding function with dimension required")
+            
         # Initialize HNSW index
         self.index = hnswlib.Index(
             space = 'cosine', 
-            dim = self.dim
+            dim = embedding_function.dimension
         )
         self.index.init_index(
-            max_elements = max_elements,
+            max_elements = self.max_elements,
             ef_construction = ef_construction,
             M = M,
             allow_replace_deleted = allow_replace_deleted
         )
         
-        # Metadata storage
-        self.data: Dict[int, Dict[str, Any]] = {}
+        # Store metadata directly using same IDs as index
+        self.data = {}
         
-        # Thread-safe singleton executor initialization
-        with HNSWStore._instance_lock:
-            if HNSWStore._executor is None:
-                HNSWStore._executor = ContextAwareThreadPoolExecutor(
-                    max_workers=min(32, (os.cpu_count() or 1) + 4)
-                )
+        # Lazy indexing setup
+        self.lazy_indexing = lazy_indexing
+        self._pending_index = set()
+        self._indexed = set()
+        self._index_lock = asyncio.Lock()
     
     
     async def add(
@@ -118,7 +110,7 @@ class HNSWStore(BaseVectorStore):
         text: Optional[Union[str, List[str]]] = None,
         embedding_function: Optional[BaseEmbeddingFunction] = None,
         embeddings: Optional[Union[np.ndarray, list[float], list[Union[np.ndarray, list[float]]]]] = None, 
-        metadata: Optional[Union[List[Any], Any]] = [],
+        metadata: Optional[Union[List[Any], Any]] = None,
     ) -> List[int]:
         """
         Add items to the vector store.
@@ -134,44 +126,53 @@ class HNSWStore(BaseVectorStore):
         :return: List of assigned IDs
         :rtype: List[int]
         """
-    
-        if not embeddings and text:
-            if isinstance(text, str):
-                text = [text]
-                
-            if embedding_function is None:
-                embedding_function = self.internal_embed
+        if not embedding_function:
+            embedding_function = self.embedding_function
         
-            embeddings = await embedding_function(text)
-    
-            if metadata is None:
+        # Generate embeddings if needed
+        if embeddings is None:
+            if text:
                 if isinstance(text, str):
-                    metadata = Message(content = text)
-                elif isinstance(text, list):
-                    metadata = [Message(content = text) for text in text]
-               
-        # Process metadata
+                    text = [text]
+                embeddings = await embedding_function(text)
+                embeddings = np.array(embeddings)
+                
+                if metadata is None:
+                    metadata = [Context(content = t) for t in text]
+            
+            elif metadata is not None:
+                try:
+                    if isinstance(metadata, list):
+                        text = [await meta.content for meta in metadata]
+                    else:
+                        text = [await metadata.content]
+                    embeddings = await embedding_function(text)
+                    embeddings = np.array(embeddings)
+                except Exception as e:
+                    raise ValueError("No text or metadata provided to add in vector store!")
+            else:
+                raise ValueError("Either text, embeddings, or metadata with content must be provided")
+                
         if not isinstance(metadata, list):
-            id = metadata.id
             metadata = [metadata]
-            ids = [id]  
-        else:
-            ids = [meta.id for meta in metadata]
-         
+            
+        ids = [meta.id for meta in metadata]
+    
         if len(embeddings) != len(metadata):
             raise ValueError(f"Number of embeddings ({len(embeddings)}) must match metadata ({len(metadata)})")
+            
+        # Add items using their own IDs directly
+        with self._instance_lock:
+            self.index.add_items(
+                data = embeddings,
+                ids = ids
+            )
+            
+            # Store metadata with same IDs
+            for id_, meta in zip(ids, metadata):
+                self.data[id_] = meta
         
-        # Add embeddings to HNSW index - must be sequential
-        self.index.add_items(embeddings, ids)
-        
-        # Store processed metadata
-        for id_, meta in zip(ids, metadata):
-            self.data[id_] = meta
-        
-        if len(ids) == 1:
-            return ids[0]
-        else:
-            return ids
+        return ids[0] if len(ids) == 1 else ids
     
     
     async def search_relevant(
@@ -219,7 +220,7 @@ class HNSWStore(BaseVectorStore):
             query = [query]
         
         if embedding_function is None:
-            embedding_function = self.internal_embed
+            embedding_function = self.embedding_function
         
         embeddings = await embedding_function(query)
         
@@ -230,21 +231,27 @@ class HNSWStore(BaseVectorStore):
             actual_k = min(k * 100, current_count)
 
             # Perform search
-            labels, distances = self.index.knn_query(embeddings, k=actual_k)
-
+            labels, distances = self.index.knn_query(
+                embeddings, 
+                k = actual_k
+            )
+            
             for idx, dist in zip(labels[0], distances[0]):
-                meta = self.data[idx]
-                if all(meta[attr] == filter[attr] for attr in filter.keys()):
+                meta = self.data[idx]  # Use index ID directly to get metadata
+                if all(getattr(meta, attr) == filter[attr] for attr in filter.keys()):
                     meta.score = 1 - dist
                     results.append(meta)
-                else:
-                    continue
         else:
             actual_k = min(k, current_count)
-   
+
+            labels, distances = self.index.knn_query(
+                embeddings, 
+                k = actual_k
+            )
+        
             # Extracts results
             for idx, dist in zip(labels[0], distances[0]):
-                meta = self.data[idx]
+                meta = self.data[idx]  # Use index ID directly to get metadata
                 meta.score = 1 - dist
                 results.append(meta)
                 
@@ -253,56 +260,54 @@ class HNSWStore(BaseVectorStore):
     
     async def delete(
         self, 
-        ids: Union[int, List[int]]
+        ids: Union[str, List[str]]
     ) -> None:
         """
-        Permanently delete items by rebuilding the index without them.
+        Delete items by rebuilding index without them.
         
         :param ids: Single ID or list of IDs to delete
-        :type ids: Union[int, List[int]]
+        :type ids: Union[str, List[str]]
         """
-        # Convert single ID to list
-        if isinstance(ids, int):
+        if not isinstance(ids, list):
             ids = [ids]
-        
-        # Convert to set for O(1) lookup
         delete_set = set(ids)
         
-        # Get all existing embeddings and metadata
-        remaining_embeddings = []
-        remaining_metadata = []
-        
-        # Collect remaining items
-        current_count = self.index.get_current_count()
-        for old_id in range(current_count):
-            if old_id not in delete_set:
-                # Get embedding for this ID
-                embedding = self.index.get_items([old_id])[0]
-                remaining_embeddings.append(embedding)
-                remaining_metadata.append(self.data[old_id])
-        
-        # Create new index with same parameters
-        new_index = hnswlib.Index(space='cosine', dim=self.dim)
-        new_index.init_index(
-            max_elements = self.max_elements,
-            ef_construction = self.index.ef_construction,
-            M = self.index.M
-        )
-        
-        # Add remaining items to new index
-        if remaining_embeddings:
-            new_index.add_items(
-                data = np.array(remaining_embeddings),
-                ids = range(len(remaining_embeddings))
+        with self._instance_lock:
+            # Get items to keep
+            remaining_embeddings = []
+            remaining_metadata = []
+            remaining_ids = []
+            
+            valid_ids = set(self.index.get_ids_list())
+            
+            for id_ in self.data.keys():
+                if id_ not in delete_set and id_ in valid_ids:
+                    embedding = self.index.get_items([id_])[0]
+                    remaining_embeddings.append(embedding)
+                    remaining_metadata.append(self.data[id_])
+                    remaining_ids.append(id_)
+            
+            # Create new index
+            dimension = self.index.dim
+            new_index = hnswlib.Index(space='cosine', dim=dimension)
+            new_index.init_index(
+                max_elements=self.max_elements,
+                ef_construction=self.index.ef_construction,
+                M=self.index.M
             )
-        
-        # Update instance variables
-        self.index = new_index
-        self.data = {
-            new_id: meta 
-            for new_id, meta in enumerate(remaining_metadata)
-        }
-
+            
+            if remaining_embeddings:
+                new_index.add_items(
+                    data=np.array(remaining_embeddings),
+                    ids=remaining_ids  # Use original IDs
+                )
+            
+            self.index = new_index
+            self.data = {
+                id_: meta for id_, meta in zip(remaining_ids, remaining_metadata)
+            }
+    
+    
     async def reset(self) -> None:
         """
         Reset the vector store to an empty state.
@@ -310,7 +315,10 @@ class HNSWStore(BaseVectorStore):
         Reinitializes the index with the same parameters but no data.
         """
         # Create fresh empty index with same parameters
-        new_index = hnswlib.Index(space='cosine', dim=self.dim)
+        new_index = hnswlib.Index(
+            space = 'cosine', 
+            dim = self.dim
+        )
         new_index.init_index(
             max_elements = self.max_elements,
             ef_construction = self.index.ef_construction,
@@ -320,89 +328,7 @@ class HNSWStore(BaseVectorStore):
         # Reset instance variables
         self.index = new_index
         self.data = {}
-    
-    
-    async def save(self, path: str) -> None:
-        """
-        Save the vector store to disk.
         
-        Saves both the HNSW index and metadata concurrently.
-        
-        :param path: Directory path to save to
-        :type path: str
-        """
-        os.makedirs(path, exist_ok = True)
-        
-        # Save index and metadata concurrently
-        async def save_index():
-            """
-            Helper function to save HNSW index.
-            
-            :ivar path: Path to save the index file
-            :type path: str
-            """
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                self._executor,
-                self.index.save_index,
-                os.path.join(path, "index.bin")
-            )
-            
-        async def save_metadata():
-            """Save metadata with proper serialization"""
-            # Serialize each metadata item
-            serialized_data = {}
-            for id_, item in self.data.items():
-                if hasattr(item, 'serialize'):
-                    serialized_data[id_] = await item.serialize()
-                else:
-                    serialized_data[id_] = item
-                    
-            # Save store configuration
-            metadata_dict = {
-                "metadata": serialized_data,
-                "dim": self.dim,
-                "max_elements": self.max_elements,
-                "ef_construction": self.index.ef_construction,
-                "M": self.index.M
-            }
-            
-            # Write metadata using executor to avoid blocking
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(
-                self._executor,
-                lambda: self._write_metadata(path / "metadata.json", metadata_dict)
-            )
-
-        def _write_metadata(self, filepath, metadata_dict):
-            """Helper method to write metadata synchronously"""
-            with open(filepath, "wb") as f:
-                f.write(orjson.dumps(metadata_dict))
-        
-        await asyncio.gather(save_index(), save_metadata())
-    
-
-    async def load(self, path: str) -> None:
-        """
-        Load the vector store from disk.
-        
-        Loads both the HNSW index and metadata.
-        
-        :param path: Directory path to load from
-        :type path: str
-        """
-        with open(os.path.join(path, "metadata.json"), "rb") as f:
-            data = orjson.loads(f.read())
-            self.data = data["metadata"]
-            self.dim = data["dim"]
-            self.max_elements = data["max_elements"]
-        
-        # Reinitialize and load index
-        self.index = hnswlib.Index(space = 'cosine', dim = self.dim)
-        self.index.load_index(
-            os.path.join(path, "index.bin"),
-            max_elements = self.max_elements
-        )
         
     async def __aenter__(self):
         """
@@ -412,6 +338,7 @@ class HNSWStore(BaseVectorStore):
         :rtype: HNSWStore
         """
         return self
+
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """
@@ -425,6 +352,7 @@ class HNSWStore(BaseVectorStore):
         """
         await self.__class__.acleanup_executor()
 
+
     def __enter__(self):
         """
         Sync context manager entry.
@@ -433,6 +361,7 @@ class HNSWStore(BaseVectorStore):
         :rtype: HNSWStore
         """
         return self
+
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """
@@ -446,93 +375,143 @@ class HNSWStore(BaseVectorStore):
         """
         self.__class__.cleanup_executor()
     
+    
     def write_metadata(self, filepath: Path, metadata_dict: dict) -> None:
         """Write metadata to file synchronously"""
-        with open(filepath, "wb") as f:
-            f.write(orjson.dumps(metadata_dict))
+        with open(filepath, "w") as f:
+            f.write(json.dumps(metadata_dict))
 
-    async def serialize(self, path: Path) -> None:
+
+    async def serialize(self, path: Union[str, Path]) -> None:
         """
         Serialize the vector store to disk.
         
-        :param path: Directory path to save serialized data
-        :type path: Path
+        :param path: Directory path to save to
+        :type path: Union[str, Path]
         """
+        path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
-        
-        # Save index and metadata concurrently
-        async def save_index():
-            if self.index:
-                self.index.save_index(str(path / "index.bin"))
-                
-        async def save_metadata():
-            # Serialize the data items first
-            serialized_data = {}
-            for k, v in self.data.items():
-                if hasattr(v, 'serialize'):
-                    # Handle async serializable objects
-                    serialized_data[str(k)] = await v.serialize()
-                else:
-                    # Handle basic JSON-serializable objects
-                    serialized_data[str(k)] = v
-            
-            # Prepare metadata dict with serialized data
-            metadata_dict = {
-                "metadata": serialized_data,
-                "dim": self.dim,
-                "max_elements": self.max_elements,
-                "ef_construction": self.index.ef_construction if self.index else None,
-                "M": self.index.M if self.index else None
-            }
-            
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                lambda: self.write_metadata(path / "metadata.json", metadata_dict)
-            )
-            
-        await asyncio.gather(save_index(), save_metadata())
 
-    async def deserialize(self, path: Path) -> None:
+        metadata = {
+            "metadata": {},
+            "types": {},
+            "config": {
+                "max_elements": self.max_elements,
+                "dimension": self.embedding_function.dimension,
+                "ef_construction": self.index.ef_construction,
+                "M": self.index.M
+            }
+        }
+
+        for id_, item in self.data.items():
+            if hasattr(item, 'serialize'):
+                serialized = await item.serialize()
+                metadata["metadata"][id_] = serialized
+                metadata["types"][id_] = item.__class__.__name__
+            else:
+                metadata["metadata"][id_] = item
+        
+        async with aiofiles.open(path / "data.json", "w") as f:
+            await f.write(json.dumps(metadata))
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            self.index.save_index,
+            str(path / "index.bin")
+        )
+
+
+    async def deserialize(self, path: Union[str, Path]) -> None:
         """
         Deserialize the vector store from disk.
         
         :param path: Directory path containing serialized data
-        :type path: Path
+        :type path: Union[str, Path]
         """
-        # Load metadata first to get parameters
-        if (path / "metadata.json").exists():
-            with open(path / "metadata.json", 'rb') as f:
-                data = orjson.loads(f.read())
-                
-                # Deserialize the data items
-                self.data = {}
-                for k, v in data["metadata"].items():
-                    if isinstance(v, dict) and v.get("_type") == "Message":
-                        # Handle Message objects
-                        self.data[k] = await Message.deserialize(v)
+        path = Path(path)
+        
+        data_path = path / "data.json"
+        index_path = path / "index.bin"
+        
+        if not data_path.exists():
+            print(f"No data file found at {data_path}, initializing empty store")
+            self.data = {}
+            return
+        
+        async with aiofiles.open(data_path, "r") as f:
+            content = await f.read()
+            metadata = json.loads(content)
+            
+            config = metadata["config"]
+            self.max_elements = config["max_elements"]
+            dimension = config["dimension"]
+            
+            self.data = {}
+            for id_, item in metadata["metadata"].items():
+                if isinstance(item, str):
+                    if "File" in metadata["types"].get(id_, ""):
+                        self.data[id_] = await File.deserialize(item)
+                    elif "Message" in metadata["types"].get(id_, ""):
+                        self.data[id_] = await Message.deserialize(item)
+                    elif "Chunk" in metadata["types"].get(id_, ""):
+                        self.data[id_] = await Chunk.deserialize(item)
                     else:
-                        # Handle basic JSON objects
-                        self.data[k] = v
-                        
-                self.dim = data["dim"]
-                self.max_elements = data["max_elements"]
-                
-                # Initialize index with parameters from metadata
-                if data["ef_construction"] and data["M"] and (path / "index.bin").exists():
-                    self.index = hnswlib.Index(
-                        space='cosine', 
-                        dim=self.dim
-                    )
-                    # Set construction parameters before loading
-                    self.index.init_index(
-                        max_elements=self.max_elements,
-                        ef_construction=data["ef_construction"],
-                        M=data["M"]
-                    )
-                    # Now load the index data
-                    self.index.load_index(
-                        str(path / "index.bin"),
-                        max_elements=self.max_elements
-                    )
+                        self.data[id_] = item
+                else:
+                    self.data[id_] = item
+        
+        if index_path.exists():
+            self.index = hnswlib.Index(space='cosine', dim=dimension)
+            
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: self.index.load_index(
+                    str(index_path),
+                    max_elements=self.max_elements
+                )
+            )
+        else:
+            logger.warning(f"No index file found at {index_path}, initializing empty index")
+            self.index = None
     
+    
+    async def update(
+        self,
+        id: str,
+        text: Optional[str] = None,
+        embedding: Optional[np.ndarray] = None,
+        metadata: Any = None
+    ) -> None:
+        """
+        Update an existing item in the store by marking old as deleted and adding new.
+        
+        :param id: ID of item to update
+        :type id: str
+        :param text: New text content (will be embedded if provided)
+        :type text: Optional[str]
+        :param embedding: New pre-computed embedding
+        :type embedding: Optional[np.ndarray]
+        :param metadata: New metadata
+        :type metadata: Any
+        """
+        if text is not None:
+            # Generate new embedding
+            embedding = (await self.internal_embed([text]))[0]
+        
+        if embedding is not None:
+            # Mark old item as deleted and add new embedding at same position
+            index_id = self.id_to_index[id]
+            self.index.mark_deleted(index_id)
+            self.index.add_items(
+                data = embedding,
+                ids = [index_id]
+            )
+        
+        if metadata is not None:
+            # Update metadata
+            self.data[id] = metadata
+
+
+ 

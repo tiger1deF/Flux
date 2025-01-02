@@ -1,8 +1,7 @@
 import os
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 from datetime import datetime
 from typing import Any, List, Optional, Union
-from functools import lru_cache
 import sys
 import asyncio
 import pandas as pl
@@ -12,25 +11,16 @@ import base64
 import msgpack
 import io
 import pyarrow as pa
-from enum import Enum, auto
+from functools import cached_property
 
 from utils.shared.tokenizer import encode_async
 from utils.shared.tokenizer import slice_text, SliceType
-from utils.summarization import MetadataType
-from utils.serialization import get_compressor, get_decompressor
 
-# Import SerializationType enum from serialization.py
-class SerializationType(Enum):
-    """Supported serialization types"""
-    ARROW = auto()
-    PLOTLY = auto()
-    MSGPACK = auto()
-    PICKLE = auto()
-    NUMPY = auto()
-    IMAGE = auto()
-    PARQUET = auto()
-    JSON = auto()
-    NONE = auto()
+from utils.summarization import MetadataType
+from utils.serialization import get_compressor, get_decompressor, SerializationType
+
+from agents.storage.models import IDFactory
+
 
 
 class Metadata(BaseModel):
@@ -50,7 +40,7 @@ class Metadata(BaseModel):
     :ivar type: Metadata type
     :type type: MetadataType
     """
-    id: Union[int, str] = Field(default_factory = lambda: int.from_bytes(os.urandom(3), 'big') % 1_000_000)
+    id: int = Field(default_factory = lambda: IDFactory.next_id())
     date: datetime = Field(default_factory = datetime.now)
     description: str = Field(default = None)
     agent_name: str = Field(default = "base")
@@ -63,6 +53,8 @@ class Metadata(BaseModel):
     # Store data reference directly
     stored_data: Any = Field(default=None, alias='data')
     content_cache: Optional[str] = Field(default=None, exclude=True)
+
+    _tokens: Optional[List[int]] = PrivateAttr(default=None)
 
     class Config:
         # Allow arbitrary types to be stored by reference
@@ -140,16 +132,17 @@ class Metadata(BaseModel):
         return content
 
 
-    @lru_cache(maxsize = 1)
     async def tokens(self) -> List[int]:
-        """
-        Get tokenized representation of metadata summary.
-        
-        :return: List of token IDs
-        :rtype: List[int]
-        """
-        summary = str(self.data)
-        return await encode_async(summary)
+        """Get tokenized content with caching"""
+        if self._tokens is None:
+            self._tokens = await encode_async(str(self.stored_data))
+        return self._tokens
+    
+    async def token_length(self) -> int:
+        """Get the token length asynchronously"""
+        if self._tokens is None:
+            await self.tokens()
+        return len(self._tokens)
 
 
     async def clear_caches(self) -> None:
@@ -158,7 +151,8 @@ class Metadata(BaseModel):
         self.content_cache = None
 
 
-    async def __len__(self) -> int:
+    @cached_property
+    async def length(self) -> int:
         """
         Get token count of metadata summary content.
         
@@ -339,7 +333,12 @@ class Metadata(BaseModel):
         """
         return bool(self.data)
 
-    async def token_length(self) -> int:
-        """Get the token length asynchronously"""
-        tokens = await self.tokens()
-        return len(tokens)
+    def __hash__(self) -> int:
+        """Make Metadata hashable for caching"""
+        return hash(self.id)
+    
+    def __eq__(self, other: object) -> bool:
+        """Define equality for hashing"""
+        if not isinstance(other, Metadata):
+            return False
+        return self.id == other.id

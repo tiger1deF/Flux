@@ -24,7 +24,6 @@ setup(
     python_requires=">=3.9",
     install_requires=[
         "msgpack>=1.0.5",
-        "orjson>=3.9.10",
         "google-generativeai",
         "hnswlib",
         "aiofiles",

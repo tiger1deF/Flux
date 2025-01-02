@@ -51,9 +51,9 @@ import asyncio
 # Create an agent with basic logging
 agent = Agent(
     name="Test Agent",
-    config=AgentConfig(
-        task_prompt="You must respond like a pirate",
-        logging=Logging.ENABLED
+    config = AgentConfig(
+        task_prompt = "You must respond like a pirate",
+        logging = Logging.ENABLED
     )
 )
 

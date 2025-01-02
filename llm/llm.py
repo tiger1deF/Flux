@@ -6,9 +6,29 @@ import asyncio
 import threading
 import types
 
-from llm.models import LLMParameter
+from dataclasses import dataclass
 
 
+@dataclass
+class LLMParameter:
+    """
+    Dataclass representing a parameter for an LLM completion function.
+    
+    :ivar name: Name of the parameter
+    :type name: str
+    :ivar type: Type of the parameter
+    :type type: Type
+    :ivar required: Whether the parameter is required
+    :type required: bool
+    :ivar default: Default value for the parameter
+    :type default: Any
+    """
+    name: str
+    type: Type
+    required: bool
+    default: Any = None
+    
+    
 class LLM:
     """
     Flux wrapper class for LLM completion functions.
@@ -40,6 +60,7 @@ class LLM:
     _function_cache: Dict[Callable, Dict[str, Any]] = weakref.WeakKeyDictionary()
     _thread_local = threading.local()
     _lock = threading.Lock()
+    _call_impl: Callable = None
     
     # Standard parameters
     top_p: float = 0.9
@@ -87,15 +108,19 @@ class LLM:
         if cached_inspection:
             self.parameters = cached_inspection['parameters']
             self.input_param_name = cached_inspection['input_param_name']
-            self._call_impl = cached_inspection['call_impl']
-            
+            self._async_call_impl = cached_inspection['async_impl']
+            self._sync_call_impl = cached_inspection['sync_impl']
         else:
+            # Inspect function and build implementations
             self._inspect_function()
             self._build_call_implementation()
+            
+            # Cache the results
             self._function_cache[completion_fn] = {
                 'parameters': self.parameters,
                 'input_param_name': self.input_param_name,
-                'call_impl': self._call_impl
+                'async_impl': self._async_call_impl,
+                'sync_impl': self._sync_call_impl
             }
        
         self._validate_types(**self.default_params)
@@ -117,7 +142,7 @@ class LLM:
         return normalized
 
     def _build_call_implementation(self):
-        """Build optimized call implementation."""
+        """Build optimized call implementations for both sync and async."""
         valid_params = {param.name for param in self.parameters}
         
         # Pre-compute filtered default args
@@ -132,59 +157,120 @@ class LLM:
             for param in valid_params
         )
         
-        if self.is_async:
-            async def _call_impl(self, query: str, **kwargs):
-                # Start with pre-filtered defaults
-                call_args = self._filtered_defaults.copy()
-                
-                # Update with filtered kwargs
-                call_args.update({
-                    k: v for k, v in kwargs.items() 
-                    if k in valid_params
-                })
-                
-                # Normalize any new parameters from kwargs
-                normalized_kwargs = self._normalize_parameters(kwargs)
-                call_args.update({
-                    k: v for k, v in normalized_kwargs.items()
-                    if k in valid_params and k not in kwargs
-                })
-                
-                # Prepare input text
-                input_text = f"{self.system_prompt}\n\n{query}" if self.system_prompt else query
-                call_args[self.input_param_name] = input_text
-                
-                return await self.completion_fn(**call_args)
-        else:
-            def _call_impl(self, query: str, **kwargs):
-                # Start with pre-filtered defaults
-                call_args = self._filtered_defaults.copy()
-                
-                # Update with filtered kwargs
-                call_args.update({
-                    k: v for k, v in kwargs.items() 
-                    if k in valid_params
-                })
-                
-                # Normalize any new parameters from kwargs
-                normalized_kwargs = self._normalize_parameters(kwargs)
-                call_args.update({
-                    k: v for k, v in normalized_kwargs.items()
-                    if k in valid_params and k not in kwargs
-                })
-                
-                # Prepare input text
-                input_text = f"{self.system_prompt}\n\n{query}" if self.system_prompt else query
-            
-                call_args[self.input_param_name] = input_text
-                return self.completion_fn(**call_args)
+        # Create instance methods
+        self._async_call_impl = types.MethodType(self._create_async_impl(valid_params), self)
+        self._sync_call_impl = types.MethodType(self._create_sync_impl(valid_params), self)
 
-        self._call_impl = types.MethodType(_call_impl, self)
+
+    def _create_async_impl(self, valid_params):
+        """Create the async implementation function"""
+        async def _async_call_impl(self, query: str, **kwargs):
+            # Start with pre-filtered defaults
+            call_args = self._filtered_defaults.copy()
+            
+            # Update with filtered kwargs
+            call_args.update({
+                k: v for k, v in kwargs.items() 
+                if k in valid_params
+            })
+            
+            # Normalize any new parameters from kwargs
+            normalized_kwargs = self._normalize_parameters(kwargs)
+            call_args.update({
+                k: v for k, v in normalized_kwargs.items()
+                if k in valid_params and k not in kwargs
+            })
+            
+            # Prepare input text
+            input_text = f"{self.system_prompt}\n\n{query}" if self.system_prompt else query
+            call_args[self.input_param_name] = input_text
+            
+            return await self.completion_fn(**call_args)
+        return _async_call_impl
+
+
+    def _create_sync_impl(self, valid_params):
+        """Create the sync implementation function"""
+        def _sync_call_impl(self, query: str, **kwargs):
+            # Start with pre-filtered defaults
+            call_args = self._filtered_defaults.copy()
+            
+            # Update with filtered kwargs
+            call_args.update({
+                k: v for k, v in kwargs.items() 
+                if k in valid_params
+            })
+            
+            # Normalize any new parameters from kwargs
+            normalized_kwargs = self._normalize_parameters(kwargs)
+            call_args.update({
+                k: v for k, v in normalized_kwargs.items()
+                if k in valid_params and k not in kwargs
+            })
+            
+            # Prepare input text
+            input_text = f"{self.system_prompt}\n\n{query}" if self.system_prompt else query
+            call_args[self.input_param_name] = input_text
+            
+            with self._lock:  # Thread safety for sync calls
+                result = self.completion_fn(**call_args)
+                # Handle case where completion_fn returns a coroutine
+                if asyncio.iscoroutine(result):
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        result = loop.run_until_complete(result)
+                    finally:
+                        loop.close()
+                return result
+        return _sync_call_impl
 
 
     def __call__(self, query: str, **kwargs) -> Union[str, Coroutine[Any, Any, str]]:
-        """Call implementation that properly handles sync/async contexts"""
-        return self._call_impl(query, **kwargs)
+        """
+        Call implementation that works in both sync and async contexts.
+        
+        Automatically handles context switching between sync/async:
+        - If called in async context: returns a coroutine
+        - If called in sync context: returns the result directly
+        
+        The completion function will be coerced into the appropriate context:
+        - Async completion_fn in sync context: runs in event loop
+        - Sync completion_fn in async context: runs in thread pool
+        
+        :param query: The query text to process
+        :type query: str
+        :param kwargs: Additional parameters to pass to the completion function
+        :type kwargs: Any
+        :return: Completion result or coroutine that will return completion
+        :rtype: Union[str, Coroutine[Any, Any, str]]
+        """
+        try:
+            # We're in an async context
+            loop = asyncio.get_running_loop()
+            if asyncio.iscoroutinefunction(self.completion_fn):
+                # Both async - direct return
+                return self._async_call_impl(query, **kwargs)
+            else:
+                # Sync fn in async context - wrap in thread pool
+                return loop.run_in_executor(
+                    self._thread_pool,
+                    self._sync_call_impl,
+                    query,
+                    **kwargs
+                )
+        except RuntimeError:
+            # We're in a sync context
+            if asyncio.iscoroutinefunction(self.completion_fn):
+                # Async fn in sync context - run in new loop
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    return loop.run_until_complete(self._async_call_impl(query, **kwargs))
+                finally:
+                    loop.close()
+            # Both sync - direct return
+            return self._sync_call_impl(query, **kwargs)
 
 
     @staticmethod

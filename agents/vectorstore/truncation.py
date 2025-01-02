@@ -7,7 +7,7 @@ from agents.config.models import ContextConfig, TruncationType
 
 T = TypeVar('T')
 async def truncate_items(
-    retrieved_items: List[T],
+    items: List[T],
     context_config: ContextConfig
 ) -> List[T]:
     """Truncate the items based on the configuration
@@ -29,13 +29,13 @@ async def truncate_items(
     if context_config.truncation_type == TruncationType.TOKEN_LIMIT:
         max_tokens = context_config.max_tokens
         item_lengths = await asyncio.gather(*[
-            item.token_length() for item in retrieved_items
+            item.token_length() for item in items
         ])
         
         result_items = []
         current_tokens = 0
         
-        for idx, (item, length) in enumerate(zip(retrieved_items, item_lengths)):
+        for idx, (item, length) in enumerate(zip(items, item_lengths)):
             if current_tokens + length > max_tokens:
                 remaining = max_tokens - current_tokens
                 if remaining > 0:
@@ -53,12 +53,12 @@ async def truncate_items(
         return result_items
         
     elif context_config.truncation_type == TruncationType.MESSAGE_COUNT:
-        return retrieved_items[-context_config.message_count:]
+        return items[-context_config.message_count:]
         
     elif context_config.truncation_type == TruncationType.TRIM_MAX:
         max_tokens = context_config.max_tokens
         message_count = context_config.message_count
-        items = retrieved_items[-message_count:]
+        items = items[-message_count:]
         
         item_lengths = await asyncio.gather(*[
             item.token_length() for item in items
@@ -105,9 +105,9 @@ async def truncate_items(
         ratio = context_config.sliding_window_ratio
         
         item_lengths = await asyncio.gather(*[
-            item.token_length() for item in reversed(retrieved_items)
+            item.token_length() for item in reversed(items)
         ])
-        total_items = len(retrieved_items)
+        total_items = len(items)
         
         age_factors = [(idx + 1) / total_items for idx in range(total_items)]
         keep_ratios = [ratio + ((1 - ratio) * age) for age in age_factors]
@@ -116,7 +116,7 @@ async def truncate_items(
         result_items = []
         current_tokens = 0
         
-        for idx, (item, allowed) in enumerate(zip(reversed(retrieved_items), allowed_tokens)):
+        for idx, (item, allowed) in enumerate(zip(reversed(items), allowed_tokens)):
             if current_tokens + allowed > max_tokens:
                 remaining = max_tokens - current_tokens
                 if remaining > 0:
@@ -146,12 +146,12 @@ async def truncate_items(
         start_count = context_config.preserve_start_messages
         end_count = context_config.preserve_end_messages
         
-        if len(retrieved_items) <= (start_count + end_count):
-            return retrieved_items
+        if len(items) <= (start_count + end_count):
+            return items
             
-        start_items = retrieved_items[:start_count]
-        end_items = retrieved_items[-end_count:]
-        middle_items = retrieved_items[start_count:-end_count]
+        start_items = items[:start_count]
+        end_items = items[-end_count:]
+        middle_items = items[start_count:-end_count]
         
         start_lengths, end_lengths, middle_lengths = await asyncio.gather(
             asyncio.gather(*[item.token_length() for item in start_items]),
@@ -201,3 +201,5 @@ async def truncate_items(
             current_tokens += allowed
             
         return start_items + truncated_middle + end_items
+
+

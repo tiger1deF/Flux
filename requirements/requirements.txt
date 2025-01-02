@@ -1,6 +1,5 @@
 # Storage + serialization
 msgpack
-orjson>=3.9.10
 zstandard
 pyarrow
 polars>=0.20.6

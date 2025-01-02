@@ -12,9 +12,9 @@ import logging
 import asyncio
 from datetime import datetime
 
-from agents.messages.message import Message, Sender
-from agents.messages.metadata import Metadata
-from agents.messages.file import File
+from agents.storage.message import Message, Sender
+from agents.storage.metadata import Metadata
+from agents.storage.file import File
 
 from agents.state.models import AgentState
 from agents.config.models import AgentConfig
@@ -86,11 +86,11 @@ class ReactAgent(Agent):
         :rtype: List[Message]
         """
         if limit:
-            return self.messages.items()[:limit]
+            return self.storage.items()[:limit]
         elif ids:
             return [self.messages[id] for id in ids]
         else:
-            return self.messages.items()
+            return self.storage.items()
 
 
     async def send_message(

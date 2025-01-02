@@ -8,9 +8,6 @@ os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 from typing import List
 import threading
 from functools import lru_cache
-import numpy as np
-from llm.models import BaseEmbeddingFunction
-import asyncio
 
 
 _model_lock = threading.Lock()
@@ -57,9 +54,3 @@ def local_generate_embedding(text: str) -> List[float]:
             convert_to_numpy = True
         )
         return embedding.tolist()  # Convert numpy array to list
-
-
-base_local_embedder = BaseEmbeddingFunction(
-    embedding_fn = local_generate_embedding,
-    dimension = 1024,
-)

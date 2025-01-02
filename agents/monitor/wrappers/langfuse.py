@@ -11,11 +11,15 @@ import asyncio
 from functools import wraps
 import traceback
 
-from langfuse import Langfuse
+import langfuse
 
 from agents.config.models import AgentStatus
 
-from agents.messages.message import Message, Sender, MessageType
+from agents.storage.message import Message
+from agents.storage.context import Context, ContextType
+
+from langfuse import Langfuse
+langfuse = Langfuse()
 
 
 def langfuse_agent_wrapper(func):
@@ -46,94 +50,68 @@ def langfuse_agent_wrapper(func):
         :return: Response message or error message
         :rtype: Message
         """
-        # Initialize Langfuse client
-        langfuse = Langfuse()
-        logging_tasks = []
-        start_time = datetime.now()
-    
-        if args and isinstance(args[0], Message):
-            input_message = args[0]
-        elif kwargs.get('input_message'):
-            input_message = kwargs.get('input_message')
-        else:
-            raise ValueError("Input Message class is required for agent!")
-                
-        if state := kwargs.get('state'):
-            self.state = state
-                
-        self.agent_status = AgentStatus.RUNNING
-        
-        input_message.type = MessageType.INPUT
-        # Use state message store
-        await self.state.add_message(input_message)
-        
-        await self.agent_log.log_input(input_message)
-        
         try:
+            start_time = datetime.now()
+            input_message = kwargs.get('input_message') or args[0]
+            if not isinstance(input_message, Message):
+                raise ValueError("Input Message class is required for agent!")
+                
+            self.agent_status = AgentStatus.RUNNING
+            
+            # Ingests data from messages
+            await self.state.ingest_message_data(input_message)
+            await self.agent_log.log_input(input_message)
+         
             # Execute main function
             result = await func(self, *args, **kwargs)
             end_time = datetime.now()
             
             if not isinstance(result, Message):
                 raise ValueError("Output Message class is required for agent!")
-                     
-            result.type = MessageType.OUTPUT
-            # Use state message store
-            await self.state.add_message(result)
-                       
-            # Get messages from state store for logging
-            messages = await self.state.obtain_message_context(
-                query=None,
-                context_config=self.config.context,
-                truncate=False
-            )
-            for message in messages:
-                logging_tasks.append(self.agent_log.log_message(message))
             
+            # Log output as context with proper format
+            output_context = Context(
+                type = ContextType.PROCESS,
+                content = f"Input: {input_message.content}\nOutput: {result.content}",
+                sender = result.sender,
+                agent = self.name,
+                context_type = "output",
+                date = end_time,
+                duration = (end_time - start_time).total_seconds()
+            )
+            await self.state.add_context(output_context)
             await self.agent_log.log_output(result)
             
-            logging_tasks.append(
-                self.runtime_logger.async_info(
-                    f"{self.name} completed {func.__name__} in {end_time - start_time}"
-                )
-            )
-
-            await asyncio.gather(*logging_tasks)
-                        
             self.agent_status = AgentStatus.COMPLETED
-            
             return result
             
         except Exception as e:
-            end_time = datetime.now()
             error = traceback.format_exc()
             
-            # Log error before updating trace
-            await self.agent_log.log_error(
-                f"{self.name} failed {func.__name__}: {error}"
-            )
-            
-            await asyncio.gather(*logging_tasks)
-                
-            self.agent_status = AgentStatus.FAILED
-            error_message = Message(
+            # Log error as context
+            error_context = Context(
+                type = ContextType.ERROR,
                 content = error,
-                sender = Sender.AI,
-                agent_name = self.name,
-                date = end_time,
-                type = MessageType.ERROR
+                agent = self.name,
+                context_type = "error",
+                error_type = type(e).__name__,
+                date = datetime.now()
             )
+            await self.state.add_context(error_context)
+            await self.agent_log.log_error(error)
             
-            # Use state message store
-            await self.state.add_message(error_message)
-                        
-            return error_message
-        
+            self.agent_status = AgentStatus.FAILED
+            raise
+            
         finally:
+            # Add Langfuse trace
+            input_text = await self.agent_log.input_text()
+            output_text = await self.agent_log.output_text()
+            
             langfuse.trace(
                 name = f"{self.name}:{func.__name__}",
-                input = self.agent_log.input_text(),
-                output = self.agent_log.output_text(),
+                input = input_text,
+                output = output_text,
                 session_id = self.session_id,
                 metadata = {
                     "agent_type": self.type

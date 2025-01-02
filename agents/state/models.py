@@ -13,7 +13,6 @@ import json
 import aiofiles
 import asyncio
 from contextlib import asynccontextmanager
-import datetime
 from difflib import SequenceMatcher, unified_diff
 import polars as pl
 import numpy as np
@@ -24,16 +23,25 @@ from functools import partial, cached_property
 import multiprocessing
 from uuid import uuid4
 
-# Import message and file types
-from agents.messages.message import Message, MessageType
-from agents.messages.metadata import Metadata
-from agents.messages.file import File
+from llm import BaseEmbeddingFunction
 
+# Import message and file types
+from agents.storage.message import Message, MessageType
+from agents.storage.metadata import Metadata
+from agents.storage.file import File
+from agents.storage.models import Chunk
+
+from agents.vectorstore.models import BaseVectorStore
 from agents.vectorstore.default.store import HNSWStore
 
 from agents.config.models import ContextConfig, RetrievalType
 
 from agents.vectorstore.truncation import truncate_items
+
+from agents.storage.filestore import FileStore
+from agents.storage.context import Context, ContextType
+
+from utils.serialization import decompress_and_deserialize
 
 
 class AgentState(BaseModel):
@@ -63,24 +71,63 @@ class AgentState(BaseModel):
     session_id: str = Field(default = str(uuid4()), exclude = True)
     temp_dir: Optional[str] = Field(default = None, exclude = True)
    
-    # Context stores
-    message_store: HNSWStore = Field(
-        default_factory = lambda: HNSWStore(),
-        description = "Store for message history and retrieval"
+    # Context configuration
+    context_config: ContextConfig = Field(
+        default_factory = ContextConfig,
+        description = "Configuration for context handling and retrieval"
     )
-    file_store: HNSWStore = Field(
-        default_factory = lambda: HNSWStore(),
-        description = "Store for files"
+    
+    embedding_function: Optional[BaseEmbeddingFunction] = Field(
+        default = None,
+        description = "Shared embedding function for all stores"
     )
-    metadata_store: HNSWStore = Field(
-        default_factory = lambda: HNSWStore(),
-        description = "Store for metadata"
-    )
+    
+    # These will be initialized in __init__ with the embedding function
+    context_store: Optional[BaseVectorStore] = None
+    file_store: Optional[FileStore] = None 
+    metadata_store: Optional[BaseVectorStore] = None
+    
     context: Dict[str, Any] = Field(
         default_factory = dict,
         description = "Runtime context storage"
     )
     
+    def __init__(
+        self,
+        embedding_function: Optional[BaseEmbeddingFunction] = None,
+        **kwargs
+    ):
+        """Initialize agent state."""
+        # First initialize the base model with the embedding function
+        super().__init__(embedding_function=embedding_function, **kwargs)
+        
+        # Then set up the embedding function and stores
+        if not embedding_function:
+            from llm.embeddings.default import generate_static_embeddings
+            embedding_function = BaseEmbeddingFunction(
+                generate_static_embeddings,
+                dimension=768
+            )
+            
+        # Store the embedding function
+        self.embedding_function = embedding_function
+            
+        # Initialize stores with the embedding function
+        self.context_store = HNSWStore(embedding_function=embedding_function)
+        self.file_store = FileStore(embedding_function=embedding_function)
+        self.metadata_store = HNSWStore(embedding_function=embedding_function)
+    
+    class Config:
+        arbitrary_types_allowed = True 
+
+    async def search_file_chunks(self, query: str) -> List[Chunk]:
+        return await self.file_store.search_chunks(
+            query = query,
+            k = self.context_config.item_count,
+            chunk_size = self.context_config.chunk_size,
+            chunk_overlap = self.context_config.chunk_overlap
+        )
+        
     
     @cached_property 
     def _executor(self) -> ThreadPoolExecutor:
@@ -151,77 +198,98 @@ class AgentState(BaseModel):
 
 
     async def create_file(
-        self, 
-        filename: str, 
-        path: Union[str, Path] = None,
+        self,
+        filename: str,
         content: str = "",
-        annotations: Dict[str, Any] = {},
-        description: str = ""
-    ):
+        description: str = "",
+        annotations: Dict[str, Any] = {}
+    ) -> File:
         """
-        Create a new file in the agent's workspace.
+        Create a new file in the workspace.
         
-        :param filename: Name of the file to create
+        :param filename: Name of file to create
         :type filename: str
-        :param path: Optional custom path, defaults to temp directory
-        :type path: Union[str, Path], optional
         :param content: Initial file content
-        :type content: str, optional
-        :param annotations: Metadata annotations for the file
-        :type annotations: Dict[str, Any], optional
+        :type content: str
         :param description: File description
-        :type description: str, optional
+        :type description: str
+        :param annotations: Additional metadata
+        :type annotations: Dict[str, Any]
         :return: Created file object
         :rtype: File
         """
-        if path is None:
-            file_path = self.temp_directory / filename
+        file_path = self.temp_directory / filename
+        
+        # If content is str, use text mode
+        if isinstance(content, str):
+            async with aiofiles.open(file_path, 'w') as f:
+                await f.write(content)
         else:
-            file_path = Path(path) / filename
-        
-        async with aiofiles.open(file_path, 'w') as f:
-            await f.write(content)
-        
+            # For bytes/binary content
+            async with aiofiles.open(file_path, 'wb') as f:
+                await f.write(content)
+            
         file = File(
-            content = content,
+            data = content,
             path = str(file_path),
             description = description,
             annotations = annotations
         )
-        await self.add_file(file)
         
-    
+        await self.file_store.add_file(file)
+        return file
+
+
     async def read_file(self, filename: str) -> str:
         """
-        Read contents of a file from the agent's workspace.
+        Read contents of a file.
         
-        :param filename: Name of the file to read
+        :param filename: Name of file to read
         :type filename: str
         :return: File contents
         :rtype: str
         """
         file_path = self.temp_directory / filename
+        # Default to text mode for reading
         async with aiofiles.open(file_path, 'r') as f:
             return await f.read()
-    
 
-    async def add_message(
-        self,
-        messages: Union[Message, List[Message]]
-    ) -> None:
+
+    async def delete_file(self, filename: str) -> None:
         """
-        Add message(s) to the message store.
+        Delete a file.
         
-        :param messages: Single message or list of messages to add
-        :type messages: Union[Message, List[Message]]
+        :param filename: Name of file to delete
+        :type filename: str
         """
-        if not isinstance(messages, list):
-            messages = [messages]
-        for message in messages:
-            await self.message_store.add(
-                metadata = message,
-                text = message.content
-            )
+        file_path = self.temp_directory / filename
+        if file_path.exists():
+            await asyncio.to_thread(file_path.unlink)
+            await self.file_store.remove_file(filename)
+
+
+    async def read_directory(self, directory: Path) -> List[File]:
+        """
+        Read all files from a directory recursively.
+        
+        :param directory: Directory to read
+        :type directory: Path
+        :return: List of imported files
+        :rtype: List[File]
+        """
+        return await self.file_store.read_from_directory(directory)
+
+
+    async def write_to_directory(self, directory: Path) -> Dict[str, Path]:
+        """
+        Write all files to a directory.
+        
+        :param directory: Target directory
+        :type directory: Path
+        :return: Mapping of file IDs to written paths
+        :rtype: Dict[str, Path]
+        """
+        return await self.file_store.write_to_directory(directory)
 
 
     async def add_file(
@@ -236,12 +304,11 @@ class AgentState(BaseModel):
         """
         if not isinstance(files, list):
             files = [files]
-    
-        for file in files:
-            await self.file_store.add(
-                metadata = file,
-                text = file.content
-            )
+
+        async def add_file(file):   
+            await self.file_store.add_file(file)
+
+        await asyncio.gather(*[add_file(file) for file in files])
 
 
     async def add_metadata(
@@ -267,6 +334,7 @@ class AgentState(BaseModel):
         self,
         query: Message,
         context_config: ContextConfig,
+        retrieval_strategy: RetrievalType = None,
         filter: Optional[Dict[str, Any]] = None,
         truncate: bool = True
     ) -> List[Message]:
@@ -288,6 +356,7 @@ class AgentState(BaseModel):
             query = query,
             store = self.message_store,
             context_config = context_config,
+            retrieval_strategy = retrieval_strategy,
             filter = filter,
             truncate = truncate
         )
@@ -295,31 +364,27 @@ class AgentState(BaseModel):
 
     async def obtain_file_context(
         self,
-        query: File,
+        query: str,
         context_config: ContextConfig,
-        filter: Optional[Dict[str, Any]] = None,
-        truncate: bool = True
+        filter: Optional[Dict[str, Any]] = None
     ) -> List[File]:
         """
-        Obtain file context from file store.
+        Get relevant complete files using FileStore's file search.
         
-        :param query: Query file
-        :type query: File 
+        :param query: Search query
+        :type query: str
         :param context_config: Context configuration
-        :type context_config: ContextConfig
+        :type context_config: ContextConfig 
+        :param retrieval_strategy: Retrieval strategy
+        :type retrieval_strategy: RetrievalType
         :param filter: Optional filter criteria
         :type filter: Optional[Dict[str, Any]]
-        :param truncate: Whether to truncate results
-        :type truncate: bool
         :return: List of relevant files
         :rtype: List[File]
         """
-        return await self._obtain_context(
+        return await self.file_store.search_files(
             query = query,
-            store = self.file_store,
-            context_config = context_config,
-            filter = filter,
-            truncate = truncate
+            k = context_config.item_count
         )
 
 
@@ -327,6 +392,7 @@ class AgentState(BaseModel):
         self,
         query: Metadata,
         context_config: ContextConfig,
+        retrieval_strategy: RetrievalType = None,
         filter: Optional[Dict[str, Any]] = None,
         truncate: bool = True
     ) -> List[Metadata]:
@@ -337,6 +403,8 @@ class AgentState(BaseModel):
         :type query: Metadata
         :param context_config: Context configuration
         :type context_config: ContextConfig
+        :param retrieval_strategy: Retrieval strategy
+        :type retrieval_strategy: RetrievalType
         :param filter: Optional filter criteria
         :type filter: Optional[Dict[str, Any]]
         :param truncate: Whether to truncate results
@@ -348,6 +416,7 @@ class AgentState(BaseModel):
             query = query,
             store = self.metadata_store,
             context_config = context_config,
+            retrieval_strategy = retrieval_strategy,
             filter = filter,
             truncate = truncate
         )
@@ -358,6 +427,7 @@ class AgentState(BaseModel):
         query: Union[Message, File, Metadata],
         store: Any,
         context_config: ContextConfig,
+        retrieval_strategy: RetrievalType = None,
         filter: Optional[Dict[str, Any]] = None,
         truncate: bool = True
     ) -> List[Any]:
@@ -367,16 +437,20 @@ class AgentState(BaseModel):
         :param query: Query item
         :param store: Store to search in
         :param context_config: Context configuration
+        :param retrieval_strategy: Retrieval strategy
         :param filter: Optional filter criteria
         :param truncate: Whether to truncate results
-        :return: List of relevant items
+        :return: List of items fetched from store
         """
-        if context_config.strategy == RetrievalType.DISABLED:
+        if not retrieval_strategy:
+            retrieval_strategy = context_config.retrieval_strategy
+        
+        if retrieval_strategy == RetrievalType.NONE:
             return []
         
-        elif context_config.strategy == RetrievalType.RELEVANT:
-            retrieved_items = store.search_relevant(
-                query,
+        elif retrieval_strategy == RetrievalType.SIMILARITY:
+            retrieved_items = await store.search_relevant(
+                query = query,
                 filter = filter,
                 k = context_config.item_count
             )
@@ -385,54 +459,46 @@ class AgentState(BaseModel):
                     items = retrieved_items,
                     context_config = context_config
                 )
-           
-        elif context_config.strategy == RetrievalType.HISTORY:
-            retrieved_items = store.search_history(
-                query,
+        elif retrieval_strategy == RetrievalType.CHRONOLOGICAL:
+            retrieved_items = await store.search_history(
+                query = query,
                 filter = filter,
                 k = context_config.item_count
             )
+            
             if truncate:
                 retrieved_items = await truncate_items(
                     items = retrieved_items,
                     context_config = context_config
                 )
-
-        elif context_config.strategy == RetrievalType.ALL:
-            relevant_items = store.search_relevant(
-                query,
+                
+        elif retrieval_strategy == RetrievalType.ALL:
+            relevant_items = await store.search_relevant(
+                query = query,
                 filter = filter,
-                k = context_config.item_count // 2
+                k = context_config.item_count
             )
-            history_items = store.search_history(
-                query,
+            
+            history_items = await store.search_history(
+                query = query,
                 filter = filter,
-                k = context_config.item_count // 2
+                k = context_config.item_count
             )
+            
             if truncate:
-                retrieved_items = await truncate_items(
-                    items = relevant_items + history_items,
-                    context_config = context_config
+                modified_config = context_config / 2  # Split config for each part
+                relevant_items = await truncate_items(
+                    items=relevant_items,
+                    context_config=modified_config
                 )
-        else:
-            raise ValueError(f"Invalid retrieval strategy: {context_config.strategy}")
-      
+                history_items = await truncate_items(
+                    items = history_items,
+                    context_config = modified_config
+                )
+            
+            retrieved_items = relevant_items + history_items
+            
         return retrieved_items
-    
-    
-    def flush_context(self, **kwargs) -> None:
-        """
-        Remove items from context store.
-        
-        :param kwargs: Optional keys to remove, if none provided clears all context
-        """
-        if not kwargs:
-            self.context.clear()
-            return
-        
-        for key in kwargs.keys():
-            if key in self.context:
-                self.context.pop(key)
     
     
     ###################
@@ -494,7 +560,7 @@ class AgentState(BaseModel):
             await f.write(content)
         
         file = self.files[filename]
-        file.content = file.content + content
+        file.data = file.data + content
         file.annotations = file.annotations | annotations
         file.description = file.description + description
         
@@ -512,89 +578,26 @@ class AgentState(BaseModel):
     ) -> File:
         """
         Edit an existing file with new content and track changes.
-        
-        :param filename: Name of the file to edit
-        :type filename: str
-        :param new_content: New content to write
-        :type new_content: str
-        :param edit_description: Description of the edit
-        :type edit_description: str, optional
-        :param annotations: Additional metadata annotations
-        :type annotations: Dict[str, Any], optional
-        :return: Updated file object with edit history
-        :rtype: File
         """
-        if filename not in self.files:
-            return await self.create_file(
-                filename,
-                new_content,
-                annotations,
-                edit_description
-            )
-
-        file = self.files[filename]
-        old_content = file.content
-        differ = SequenceMatcher(None, old_content, new_content)
-        changes = []
+        # First remove old file from stores
+        await self.file_store.remove_file(filename)
         
-        for tag, i1, i2, j1, j2 in differ.get_opcodes():
-            if tag != 'equal':
-                changes.append({
-                    'type': tag,
-                    'old_start': i1,
-                    'old_end': i2,
-                    'new_start': j1, 
-                    'new_end': j2,
-                    'old_text': old_content[i1:i2],
-                    'new_text': new_content[j1:j2]
-                })
-
-        diff_text = '\n'.join(unified_diff(
-            old_content.splitlines(True),
-            new_content.splitlines(True),
-            fromfile = 'previous',
-            tofile = 'new'
-        ))
-
+        # Create new file object
         file_path = self.temp_directory / filename
         async with aiofiles.open(file_path, 'w') as f:
-            await f.write(new_content)  
-        file.content = new_content
+            await f.write(new_content)
         
-        if edit_description:
-            if file.description:
-                file.description += f"\n{edit_description}"
-            else:
-                file.description = edit_description
-
-        change_meta = {
-            "changes": changes,
-            "diff": diff_text,
-            "last_edited": str(datetime.datetime.now())
-        }
+        file = File(
+            content = new_content,
+            path = str(file_path),
+            description = edit_description,
+            annotations = annotations
+        )
         
-        file.annotations = file.annotations | annotations | {"edit_history": change_meta}
-        if "edit_count" in file.annotations:
-            file.annotations["edit_count"] += 1
-        else:
-            file.annotations["edit_count"] = 1
-
-        self.files[filename] = file
+        # Add updated file to store
+        await self.file_store.add_file(file)
         
         return file
-    
-    
-    async def delete_file(self, filename: str):
-        """
-        Delete a file from the agent's workspace.
-        
-        :param filename: Name of the file to delete
-        :type filename: str
-        """
-        file_path = self.temp_directory / filename
-        if file_path.exists():
-            await asyncio.to_thread(file_path.unlink)
-            del self.files[filename]
     
     
     async def list_files(self, pattern: str = "*") -> List[Path]:
@@ -894,16 +897,6 @@ class AgentState(BaseModel):
             yield
 
 
-    def __repr__(self):
-        """
-        Get string representation of agent state.
-        
-        :return: String representation
-        :rtype: str
-        """
-        return f"AgentState(num_messages={len(self.messages)}, num_context_vars={len(self.context)}, num_files={len(self.files)})"
-
-
     def to_dict(self) -> dict:
         """
         Convert agent state to dictionary.
@@ -912,61 +905,22 @@ class AgentState(BaseModel):
         :rtype: dict
         """
         return {
-            'messages': [message.to_dict() for message in self.messages],
-            'metadata': self.metadata.to_dict(),
-            'context': self.context,
+            'messages': self.message_store.to_dict(),
+            'metadata': self.metadata_store.to_dict(),
+            'files': self.file_store.to_dict(),
             'temp_directory': str(self.temp_directory),
-            'temp_files': [str(file) for file in self.list_files()],
             'temp_files_count': len(self.list_files())
         }
 
 
     async def write_files_to_temp(self) -> Dict[str, Path]:
-        """
-        Asynchronously write all files from messages to temporary directory.
-        Preserves original paths and creates necessary subdirectories.
-        
-        :return: Dictionary mapping file IDs to their written paths
-        :rtype: Dict[str, Path]
-        """
-        async def write_single_file(file_id: str, file: File) -> Tuple[str, Path]:
-            if not file.path:
-                return file_id, None
-            
-            # Create full path in temp directory
-            rel_path = Path(file.path).relative_to(file.path.anchor)
-            temp_path = self.temp_directory / rel_path
-            
-            # Create parent directories
-            os.makedirs(temp_path.parent, exist_ok=True)
-            
-            # Write file content
-            if isinstance(file.content, bytes):
-                async with aiofiles.open(temp_path, 'wb') as f:
-                    await f.write(file.content)
-            else:
-                async with aiofiles.open(temp_path, 'w') as f:
-                    await f.write(str(file.content))
-                
-            return file_id, temp_path
+        """Write all files from store to temporary directory"""
+        return await self.file_store.write_to_directory(self.temp_directory)
 
-        # Gather all files from messages
-        file_tasks = []
-        for file_id, file in self.files.items():
-            if file.path:  # Only process files with paths
-                file_tasks.append(write_single_file(file_id, file))
-            
-        # Execute all file writes in parallel
-        results = await asyncio.gather(*file_tasks, return_exceptions=True)
-        
-        # Filter out failed writes and create result dictionary
-        written_files = {
-            file_id: path 
-            for file_id, path in results 
-            if isinstance(path, Path)
-        }
-        
-        return written_files
+
+    async def read_files_from_directory(self, directory: Path) -> List[File]:
+        """Read all files from directory into store"""
+        return await self.file_store.read_from_directory(directory)
 
 
     async def serialize(self, path: Union[str, Path]) -> None:
@@ -979,39 +933,22 @@ class AgentState(BaseModel):
         path = Path(path)
         os.makedirs(path, exist_ok=True)
         
-        # Serialize stores concurrently
-        async def save_messages_store():
-            await self.message_store.serialize(path / "messages_store")
-            
-        async def save_files():
-            serialized_files = {}
-            for name, file in self.file_store.data.items():
-                serialized_files[name] = await file.serialize()
-            
-            async with aiofiles.open(path / "files.json", "w") as f:
-                await f.write(json.dumps(serialized_files))
-            
-        async def save_metadata():
-            serialized_metadata = {}
-            for key, meta in self.metadata_store.data.items():
-                serialized_metadata[key] = await meta.serialize()
-            
-            async with aiofiles.open(path / "metadata.json", "w") as f:
-                await f.write(json.dumps(serialized_metadata))
-            
         # Save core state data
         state_data = {
             "session_id": self.session_id,
-            "temp_dir": self.temp_dir
+            "temp_dir": self.temp_dir,
+            "embedding_function": await self.embedding_function.serialize() if self.embedding_function else None
         }
         
+        # Save JSON data in text mode
         async with aiofiles.open(path / "state.json", "w") as f:
             await f.write(json.dumps(state_data))
-            
+        
+        # Serialize stores concurrently
         await asyncio.gather(
-            save_messages_store(),
-            save_files(),
-            save_metadata()
+            self.context_store.serialize(path / "context"),
+            self.metadata_store.serialize(path / "metadata"),
+            self.file_store.serialize(path / "files")
         )
 
     async def deserialize(self, path: Union[str, Path]) -> None:
@@ -1023,57 +960,132 @@ class AgentState(BaseModel):
         """
         path = Path(path)
         
-        # Load core state data
+        # Read JSON data in text mode
         async with aiofiles.open(path / "state.json", "r") as f:
             state_data = json.loads(await f.read())
             self.session_id = state_data["session_id"]
             self.temp_dir = state_data["temp_dir"]
+            if state_data.get("embedding_function"):
+                self.embedding_function = await BaseEmbeddingFunction.deserialize(
+                    state_data["embedding_function"]
+                )
         
         # Load stores concurrently
-        async def load_messages_store():
-            # Ensure we create proper HNSWStore instance
-            if not isinstance(self.message_store, HNSWStore):
-                self.message_store = HNSWStore()
-            await self.message_store.deserialize(path / "messages_store")
-            
-        async def load_files():
-            # Ensure we create proper HNSWStore instance
-            if not isinstance(self.file_store, HNSWStore):
-                self.file_store = HNSWStore()
-                
-            async with aiofiles.open(path / "files.json", "r") as f:
-                file_data = json.loads(await f.read())
-            
-            # Deserialize files and add to store
-            for name, serialized_file in file_data.items():
-                file = await File.deserialize(serialized_file)
-                await self.file_store.add(
-                    text=str(file.content),
-                    metadata=file
-                )
-            
-        async def load_metadata():
-            # Ensure we create proper HNSWStore instance
-            if not isinstance(self.metadata_store, HNSWStore):
-                self.metadata_store = HNSWStore()
-                
-            async with aiofiles.open(path / "metadata.json", "r") as f:
-                metadata_data = json.loads(await f.read())
-            
-            # Deserialize metadata and add to store
-            for key, serialized_meta in metadata_data.items():
-                metadata = await Metadata.deserialize(serialized_meta)
-                await self.metadata_store.add(
-                    text=str(metadata.data),
-                    metadata=metadata
-                )
-        
         await asyncio.gather(
-            load_messages_store(),
-            load_files(),
-            load_metadata()
+            self.context_store.deserialize(path / "context"),
+            self.metadata_store.deserialize(path / "metadata"),
+            self.file_store.deserialize(path / "files")
         )
 
-    class Config:
-        """Pydantic model configuration"""
-        arbitrary_types_allowed = True  # Allow custom classes like HNSWStore
+
+    async def obtain_file_chunk_context(
+        self,
+        query: str,
+        context_config: ContextConfig,
+        filter: Optional[Dict[str, Any]] = None
+    ) -> List[str]:
+        """
+        Get formatted file chunks with context.
+        
+        :param query: Search query
+        :type query: str
+        :param context_config: Configuration for context retrieval
+        :type context_config: ContextConfig
+        :param filter: Optional filter criteria
+        :type filter: Optional[Dict[str, Any]]
+        :return: List of formatted file chunks
+        :rtype: List[str]
+        """
+        chunks = await self.file_store.search_chunks(
+            query = query,
+            k = context_config.item_count,
+            chunk_size = context_config.chunk_size,
+            chunk_overlap = context_config.chunk_overlap
+        )
+        
+        # Format chunks with file context
+        formatted_chunks = []
+        for chunk in chunks:
+            file_path = chunk.path
+            chunk_text = chunk.content
+            formatted = f"From file {file_path}:\n{chunk_text}"
+            formatted_chunks.append(formatted)
+                
+        return formatted_chunks
+
+
+    async def ingest_message_data(self, message: Message) -> None:
+        """
+        Ingest files and metadata from a message into their respective stores.
+        Handles both serialized data and direct objects.
+        
+        :param message: Message containing data to ingest
+        :type message: Message
+        """
+        tasks = []
+        
+        # Process files
+        for file_data in message.files:
+            if isinstance(file_data, (str, bytes)):  # Serialized data
+                file_obj = await decompress_and_deserialize(file_data, File)
+            elif isinstance(file_data, File):  # Already a File object
+                file_obj = file_data
+            else:  # Create new File object from raw data
+                file_obj = await File.create(data = file_data)
+                
+            tasks.append(self.file_store.add_file(file_obj))
+      
+        for meta_data in message.metadata:
+            if isinstance(meta_data, (str, bytes)):  # Serialized data
+                meta_obj = await decompress_and_deserialize(meta_data, Metadata)
+            elif isinstance(meta_data, Metadata):  # Already a Metadata object
+                meta_obj = meta_data
+            else:  # Create new Metadata object from raw data
+                meta_obj = Metadata(data = meta_data)
+                
+            tasks.append(self.metadata_store.add(metadata = meta_obj))
+        
+        # Run all ingestion tasks in parallel
+        if tasks:
+            await asyncio.gather(*tasks)
+
+
+    async def add_context(self, context: Context) -> None:
+        """
+        Add a context entry to the store.
+        
+        :param context: Context entry to add
+        :type context: Context
+        """
+        await self.context_store.add(
+            text=context.content,
+            metadata=context
+        )
+
+    async def get_context(
+        self,
+        query: str,
+        context_type: Optional[ContextType] = None,
+        limit: int = 10
+    ) -> List[Context]:
+        """
+        Retrieve relevant context entries.
+        
+        :param query: Search query
+        :type query: str
+        :param context_type: Optional type filter
+        :type context_type: Optional[ContextType]
+        :param limit: Maximum number of entries to return
+        :type limit: int
+        :return: List of relevant context entries
+        :rtype: List[Context]
+        """
+        filter_dict = {}
+        if context_type:
+            filter_dict["type"] = context_type
+
+        return await self.context_store.search_relevant(
+            query=query,
+            filter=filter_dict,
+            k=limit
+        )

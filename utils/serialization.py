@@ -10,7 +10,7 @@ from enum import Enum, auto
 from functools import lru_cache
 from typing import Any, Dict, Set, Type, List, Tuple
 import base64
-import orjson  
+import json
 import msgpack
 import pickle
 import logging
@@ -350,7 +350,7 @@ async def _serialize_item(item: Any) -> Any:
         elif ser_type == SerializationType.PLOTLY:
             def serialize_plotly():
                 fig_dict = item.to_dict()
-                return get_compressor().compress(orjson.dumps(fig_dict))
+                return get_compressor().compress(json.dumps(fig_dict))
             
             plotly_bytes = await loop.run_in_executor(
                 manager.get_thread_pool(),
@@ -466,7 +466,7 @@ async def _unserialize_item(item: Any) -> Any:
         elif item['type'] == 'plotly':
             def unserialize_plotly():
                 return go.Figure(
-                    orjson.loads(
+                    json.loads(
                         get_decompressor().decompress(binary_data)
                     )
                 )
@@ -609,7 +609,7 @@ async def _deserialize_item(serialized_data: Dict[str, Any]) -> Any:
         elif serialized_data['type'] == 'plotly':
             def deserialize_plotly():
                 decompressed = get_decompressor().decompress(binary_data)
-                fig_dict = orjson.loads(decompressed)
+                fig_dict = json.loads(decompressed)
                 return go.Figure(fig_dict)
             
             return await loop.run_in_executor(
@@ -728,19 +728,13 @@ async def serialize_and_compress(data: Any) -> bytes:
         return await loop.run_in_executor(None,
             lambda: data.to_arrow().serialize().to_pybytes()
         )
-    elif isinstance(data, np.ndarray):
-        buffer = io.BytesIO()
-        await loop.run_in_executor(None,
-            lambda: np.save(buffer, data, allow_pickle=False)
+    
+    # Default to msgpack for other types
+    return await loop.run_in_executor(None,
+        lambda: get_compressor().compress(
+            msgpack.packb(data, use_bin_type=True)
         )
-        return buffer.getvalue()
-    else:
-        # Default to msgpack for other types
-        return await loop.run_in_executor(None,
-            lambda: get_compressor().compress(
-                msgpack.packb(data, use_bin_type=True)
-            )
-        )
+    )
 
 
 async def decompress_and_deserialize(data: bytes, expected_type: Type = None) -> Any:
@@ -753,7 +747,6 @@ async def decompress_and_deserialize(data: bytes, expected_type: Type = None) ->
     :type expected_type: Type, optional
     :return: Deserialized data
     :rtype: Any
-    :raises TypeError: If deserialized data doesn't match expected type
     """
     loop = asyncio.get_running_loop()
     
@@ -762,22 +755,16 @@ async def decompress_and_deserialize(data: bytes, expected_type: Type = None) ->
             lambda: pl.from_arrow(pa.ipc.read_message(data).body)
         )
         return df
-    elif expected_type == np.ndarray:
-        buffer = io.BytesIO(data)
-        arr = await loop.run_in_executor(None,
-            lambda: np.load(buffer, allow_pickle=False)
-        )
-        return arr
-    else:
-        # Default msgpack deserialization
-        decompressed = await loop.run_in_executor(None,
-            lambda: get_decompressor().decompress(data)
-        )
-        result = await loop.run_in_executor(None,
-            lambda: msgpack.unpackb(decompressed, raw=False)
-        )
+    
+    # Default msgpack deserialization
+    decompressed = await loop.run_in_executor(None,
+        lambda: get_decompressor().decompress(data)
+    )
+    result = await loop.run_in_executor(None,
+        lambda: msgpack.unpackb(decompressed, raw=False)
+    )
+    
+    if expected_type and not isinstance(result, expected_type):
+        raise TypeError(f"Expected {expected_type}, got {type(result)}")
         
-        if expected_type and not isinstance(result, expected_type):
-            raise TypeError(f"Expected {expected_type}, got {type(result)}")
-            
-        return result
+    return result

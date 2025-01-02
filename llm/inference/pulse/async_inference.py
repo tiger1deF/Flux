@@ -87,7 +87,7 @@ async def _get_internal_model_list() -> List[str]:
 
 async def pulse_llm_inference(
     query: str,
-    model_name: str = "Mixtral-8x22B-Instruct-v0.1",
+    model_name: str = "gpt-4o",#"Mixtral-8x22B-Instruct-v0.1",
     temperature: float = 0.1,
     max_tokens: int = 4_000,
     top_p: float = 0.9,

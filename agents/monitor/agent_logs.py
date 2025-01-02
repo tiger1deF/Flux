@@ -2,29 +2,36 @@
 Agent logging models and utilities for structured logging output.
 
 This module provides models and utilities for handling agent logs, including
-message logs, input/output logs, and error logs with support for rich markdown formatting
+message logs, input/output logs, and error logs with rich markdown formatting
 and various data type handling.
 """
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-import polars as pl
-import plotly.graph_objects as go
-from typing import Any, Dict, Union, Callable, Mapping, Sequence, List
-from functools import lru_cache
+from datetime import datetime
+from typing import Any, Dict, Union, List, Optional
+import uuid
+import polars as pl 
 import numpy as np
+import plotly.graph_objects as go
+from functools import lru_cache
+from pathlib import Path
+from abc import ABC, abstractmethod
+from typing import Any, Dict, Union, Callable, Mapping, Sequence
 import json
 import sys
-from pathlib import Path
-from uuid import uuid4
 
+from agents.storage.message import Message, Sender
+from agents.storage.metadata import Metadata
+from agents.storage.file import File
+from agents.vectorstore.default.store import HNSWStore
 from llm import LLM
 
-from agents.agent.models import Sender
-
-from agents.messages.message import Message
-from agents.messages.file import File
+from utils.serialization import (
+    decompress_and_deserialize,
+    serialize_and_compress,
+    get_compressor,
+    get_decompressor
+)
 
     
 def get_type_handler(obj: Any) -> str:
@@ -210,9 +217,10 @@ def generate_markdown_summary(
     :return: Markdown formatted summary
     :rtype: str
     """
+    
     output_summary = ""
     if data_dict:
-        metadata_output = "# 📊 Metadata Summary\n\n"
+        metadata_output = "## 📊 Metadata Summary\n\n"
         
         summaries = []
         for name, item in data_dict.items():
@@ -224,10 +232,10 @@ def generate_markdown_summary(
         output_summary = metadata_output + "".join(summaries)
         
     if file_dict:
-        file_output = "\n\n# 📂 File Summary\n\n"
+        file_output = "# 📂 File Summary\n\n"
         file_summaries = []
         for name, file in file_dict.items():
-            file_summaries.append(file.summary())
+            file_summaries.append(file.content)
 
         output_summary += file_output + "".join(file_summaries)
         
@@ -305,10 +313,15 @@ class InputLog(BaseLogEntry):
             'input_message': self.input_message.to_dict(),
             'input_agent': self.input_agent
         }
-    
-    
-    def text(self) -> str:
-        content = "## 📨 Input Message"
+
+    async def text(self) -> str:
+        """
+        Generate formatted text representation of input log.
+        
+        :return: Markdown formatted log text
+        :rtype: str
+        """
+        content = "# 📨 Input Message"
         if self.input_agent:
             content += f" From {self.input_agent}"
         content += f"\n*🕒 Timestamp:* `{self.input_message.date}`\n"
@@ -316,10 +329,36 @@ class InputLog(BaseLogEntry):
         content += "\n### 📥 Input Message Content\n"
         content += f"{self.input_message.content}\n"
         
-        if self.input_message.metadata or self.input_message.files:
+        # Handle direct metadata and files
+        metadata_dict = {}
+        files_dict = {}
+        
+        # Process metadata
+        for meta_data in self.input_message.metadata:
+            if isinstance(meta_data, (str, bytes)):
+                meta_obj = await decompress_and_deserialize(meta_data, Metadata)
+                metadata_dict[meta_obj.id] = meta_obj
+            elif isinstance(meta_data, Metadata):
+                metadata_dict[meta_data.id] = meta_data
+            else:
+                meta_obj = Metadata(data=meta_data)
+                metadata_dict[meta_obj.id] = meta_obj
+                
+        # Process files
+        for file_data in self.input_message.files:
+            if isinstance(file_data, (str, bytes)):
+                file_obj = await decompress_and_deserialize(file_data, File)
+                files_dict[file_obj.id] = file_obj
+            elif isinstance(file_data, File):
+                files_dict[file_data.id] = file_data
+            else:
+                file_obj = await File.create(data=file_data)
+                files_dict[file_obj.id] = file_obj
+        
+        if metadata_dict or files_dict:
             content += "\n" + generate_markdown_summary(
-                self.input_message.metadata,
-                self.input_message.files
+                metadata_dict,
+                files_dict
             )
         
         return content.strip()
@@ -340,6 +379,7 @@ class ErrorLog(BaseLogEntry):
     output_message: Message = None
     error_message: str = None
     log_type: str = 'error'
+
 
     def to_dict(self) -> dict:
         """
@@ -376,7 +416,6 @@ class OutputLog(BaseLogEntry):
     """
     output_message: Message = None
     
-    
     def to_dict(self) -> dict:
         """
         Convert output log to dictionary representation.
@@ -390,21 +429,51 @@ class OutputLog(BaseLogEntry):
             'output_message': self.output_message.to_dict()
         }
 
-
-    def text(self) -> str:
+    async def text(self) -> str:
+        """
+        Generate formatted text representation of output log.
+        
+        :return: Markdown formatted log text
+        :rtype: str
+        """
         output_str = f"""# ✅ AGENT SUCCESSFULLY EXECUTED
 *🕒 Timestamp:* `{self.output_message.date}`
 
 ### 📤 Output Message Content:
 {self.output_message.content}
 """
+        # Handle direct metadata and files
+        metadata_dict = {}
+        files_dict = {}
         
-        if self.output_message.metadata or self.output_message.files:
+        # Process metadata
+        for meta_data in self.output_message.metadata:
+            if isinstance(meta_data, (str, bytes)):
+                meta_obj = await decompress_and_deserialize(meta_data, Metadata)
+                metadata_dict[meta_obj.id] = meta_obj
+            elif isinstance(meta_data, Metadata):
+                metadata_dict[meta_data.id] = meta_data
+            else:
+                meta_obj = Metadata(data=meta_data)
+                metadata_dict[meta_obj.id] = meta_obj
+                
+        # Process files
+        for file_data in self.output_message.files:
+            if isinstance(file_data, (str, bytes)):
+                file_obj = await decompress_and_deserialize(file_data, File)
+                files_dict[file_obj.id] = file_obj
+            elif isinstance(file_data, File):
+                files_dict[file_data.id] = file_data
+            else:
+                file_obj = await File.create(data=file_data)
+                files_dict[file_obj.id] = file_obj
+        
+        if metadata_dict or files_dict:
             output_str += "\n" + generate_markdown_summary(
-                self.output_message.metadata,
-                self.output_message.files
+                metadata_dict,
+                files_dict
             )
-        
+            
         return output_str.strip()
 
       
@@ -420,15 +489,41 @@ class MessageLog(BaseLogEntry):
     message: Message = None
     log_type: str = 'message'
 
-    def text(self) -> str:
+    async def text(self) -> str:
         output_str = f"\n*🕒 Timestamp:* `{self.message.date}`\n"
         output_str += "\n## 💬 Intermediate Message Content\n"
         output_str += f"{self.message.content}\n"
         
-        if self.message.metadata or self.message.files:
+        # Handle direct metadata and files
+        metadata_dict = {}
+        files_dict = {}
+        
+        # Process metadata
+        for meta_data in self.message.metadata:
+            if isinstance(meta_data, (str, bytes)):
+                meta_obj = await decompress_and_deserialize(meta_data, Metadata)
+                metadata_dict[meta_obj.id] = meta_obj
+            elif isinstance(meta_data, Metadata):
+                metadata_dict[meta_data.id] = meta_data
+            else:
+                meta_obj = Metadata(data=meta_data)
+                metadata_dict[meta_obj.id] = meta_obj
+                
+        # Process files
+        for file_data in self.message.files:
+            if isinstance(file_data, (str, bytes)):
+                file_obj = await decompress_and_deserialize(file_data, File)
+                files_dict[file_obj.id] = file_obj
+            elif isinstance(file_data, File):
+                files_dict[file_data.id] = file_data
+            else:
+                file_obj = await File.create(data=file_data)
+                files_dict[file_obj.id] = file_obj
+        
+        if metadata_dict or files_dict:
             output_str += "\n" + generate_markdown_summary(
-                self.message.metadata,
-                self.message.files
+                metadata_dict,
+                files_dict
             )
         
         return output_str.strip()
@@ -436,43 +531,26 @@ class MessageLog(BaseLogEntry):
     
 @dataclass
 class AgentLog(BaseLogEntry):
-    """
-    Comprehensive log for an agent's execution.
-    
-    :ivar agent_name: Name of the agent
-    :type agent_name: str
-    :ivar agent_type: Type of the agent
-    :type agent_type: str
-    :ivar agent_description: Description of the agent's purpose
-    :type agent_description: str
-    :ivar llm: Language model configuration
-    :type llm: Union[LLM, None]
-    :ivar agent_logs: Raw log messages
-    :type agent_logs: str
-    :ivar agent_messages: List of intermediate messages
-    :type agent_messages: List[MessageLog]
-    :ivar source_agents: List of upstream agents
-    :type source_agents: List[str]
-    :ivar target_agents: List of downstream agents
-    :type target_agents: List[str]
-    :ivar agent_input: Input log entry
-    :type agent_input: InputLog
-    :ivar agent_output: Output log entry
-    :type agent_output: OutputLog
-    :ivar session_id: Unique identifier for the execution session
-    :type session_id: str
-    """
+    """Comprehensive log for an agent's execution."""
     agent_name: str = None
     agent_type: str = None
     agent_description: str = None
-    llm: Union[LLM, None] = None
-    agent_logs: str = None
-    agent_messages: List[MessageLog] = field(default_factory=list)
     source_agents: List[str] = field(default_factory=list)
     target_agents: List[str] = field(default_factory=list)
+    llm: LLM = None
+    
+    # Add store references
+    metadata_store: Optional[HNSWStore] = None
+    file_store: Optional[HNSWStore] = None
+    
     agent_input: InputLog = None
     agent_output: OutputLog = None
-    session_id: str = str(uuid4())
+    agent_error: ErrorLog = None
+    agent_messages: List[MessageLog] = field(default_factory=list)
+    agent_logs: str = None
+    
+    # Add session_id back but with default value
+    session_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     
     
     def to_dict(self) -> dict:
@@ -512,7 +590,7 @@ class AgentLog(BaseLogEntry):
         """
         self.agent_input = InputLog(
             input_message = input_message,
-            input_agent = input_agent
+            input_agent = input_agent,
         )
 
 
@@ -546,7 +624,7 @@ class AgentLog(BaseLogEntry):
         )
         
     
-    def input_text(self) -> str:
+    async def input_text(self) -> str:
         overview = f"""# Agent Execution Log
 
 ## ⚙️ Agent Details
@@ -570,23 +648,27 @@ class AgentLog(BaseLogEntry):
                 current_value = getattr(self.llm, param_name, param_info.get('default'))
                 if current_value is not None:
                     overview += f"\n- **{param_name}:** `{current_value}`"
-        
+            overview += "\n\n"
+            
         if self.agent_input:
-            overview += self.agent_input.text()
+            overview += await self.agent_input.text()
 
         return overview
     
     
-    def output_text(self) -> str:
-        """
-        Generate a formatted text representation of the agent's output. Primarily for langfuse.
+    async def output_text(self) -> str:        
+        if not self.agent_output or not self.agent_input:
+            return "Incomplete log - missing input or output"
         
-        :return: Markdown formatted output details
-        :rtype: str
-        """
-        overview = f"*Run duration:* `{(self.agent_output.output_message.date - self.agent_input.input_message.date).total_seconds():.3f}s`"
+        try:
+            duration = (self.agent_output.output_message.date - 
+                       self.agent_input.input_message.date).total_seconds()
+            overview = f"*Run duration:* `{duration:.3f}s`"
+        except Exception as e:
+            overview = "*Run duration: Unable to calculate*"
+        
         for message in self.agent_messages:
-            overview += message.text()
+            overview += await message.text()
 
         if self.agent_logs:
             agent_logs = f"\n\n## 📝 Agent Logs\n{self.agent_logs}\n"
@@ -595,69 +677,21 @@ class AgentLog(BaseLogEntry):
         if self.agent_messages:
             overview += "\n## 💬 Intermediate Messages\n"
             for message in self.agent_messages:
-                overview += message.text()
+                overview += await message.text()
 
         if self.agent_output:
-            overview += f'\n{self.agent_output.text()}'
+            overview += f'\n{await self.agent_output.text()}'
         elif hasattr(self, 'agent_error'):
             overview += f"\n\n{self.agent_error.text()}"
         
         return overview
         
         
-    def text(self) -> str:
-        """
-        Generate a formatted text representation of the agent's execution log.
-        
-        :return: Markdown formatted execution log
-        :rtype: str
-        """
-        overview = f"""# Agent Execution Log
-*Run duration:* `{(self.agent_output.output_message.date - self.agent_input.input_message.date).total_seconds():.3f}s`
-
-## ⚙️ Agent Details
-- **Name:** `{self.agent_name}`
-- **Type:** `{self.agent_type}`
-"""
-        if self.agent_description:
-            overview += f"- **Description:** `{self.agent_description}`\n"
-
-        if self.source_agents or self.target_agents:
-            overview += f"""
-
-## 🔄 Node Connections
-- **⬆️ Upstream Agent(s):** `{self.source_agents}`
-- **⬇️ Downstream Agent(s):** `{self.target_agents}`
-"""
-
-        if self.llm:
-            overview += "\n## 🤖 LLM Configuration"
-            for param_name, param_info in self.llm.signature.items():
-                current_value = getattr(self.llm, param_name, param_info.get('default'))
-                if current_value is not None:
-                    overview += f"\n- **{param_name}:** `{current_value}`\n\n"
-        
-        if self.agent_input:
-            overview += self.agent_input.text()
-
-        for message in self.agent_messages:
-            overview += message.text()
-
-        if self.agent_logs:
-            agent_logs = f"\n\n## 📝 Agent Logs\n{self.agent_logs}\n"
-            overview += agent_logs
-
-        if self.agent_messages:
-            overview += "\n## 💬 Intermediate Messages\n"
-            for message in self.agent_messages:
-                overview += message.text()
-
-        if self.agent_output:
-            overview += f'\n{self.agent_output.text()}'
-        elif hasattr(self, 'agent_error'):
-            overview += f"\n\n{self.agent_error.text()}"
-        
-        return overview
+    async def text(self) -> str:
+        """Generate complete log text"""
+        input_text = await self.input_text()
+        output_text = await self.output_text()
+        return f"{input_text}\n\n{output_text}"
 
 
 # TODO - Integrate into structured framework

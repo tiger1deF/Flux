@@ -8,7 +8,7 @@ import time
 import logging
 from pydantic import BaseModel
 
-from agents.messages.file import File, FileType
+from agents.storage.file import File, FileType
 
 # TODO - Centralize, remove elsewhere
 logger = logging.getLogger(__name__)

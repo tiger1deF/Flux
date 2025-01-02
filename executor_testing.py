@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 
 from tools.executor import CodeExecutor, ExecutorType, ExecutionResult
-from agents.messages.file import File, FileType
+from agents.storage.file import File, FileType
 
 from deployment.config import initialize_environment
 initialize_environment()

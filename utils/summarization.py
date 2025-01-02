@@ -8,7 +8,7 @@ This module provides functions for summarizing complex data structures in a way 
 4. Supports parallel processing of large metadata structures
 """
 
-from typing import Dict, Any, List, Tuple, Callable, Generator, AsyncGenerator, Coroutine
+from typing import Dict, Any, List, Tuple, Callable, Generator, AsyncGenerator, Coroutine, Optional
 import polars as pl
 import numpy as np
 import plotly.graph_objects as go
@@ -23,6 +23,8 @@ from collections import defaultdict, Counter, deque
 import uuid
 import decimal
 from enum import Enum
+
+from agents.storage.models import FileType
 
 
 class MetadataType(str, Enum):
@@ -85,7 +87,7 @@ class MetadataType(str, Enum):
         elif isinstance(data, (Generator, AsyncGenerator)):
             return summarize_generator, cls.GENERATOR
         else:
-            return lambda x, name: f"{name} → {type(x).__name__}()", cls.UNKNOWN
+            return lambda x, name: f"`{name}` → {type(x).__name__}()", cls.UNKNOWN
 
 
 def summarize_dataframe(df: pl.DataFrame, name: str) -> str:
@@ -99,7 +101,7 @@ def summarize_dataframe(df: pl.DataFrame, name: str) -> str:
     # Show all columns, not just first 3
     cols = ', '.join(df.columns)
     desc = f"dataframe with {df.height} rows containing columns: {cols}"
-    return desc  # Return just the description, name/type handled by metadata
+    return f"`{name}` → {desc}"  # Return just the description, name/type handled by metadata
 
 
 async def summarize_figure(fig: go.Figure, name: str) -> str:
@@ -113,13 +115,13 @@ async def summarize_figure(fig: go.Figure, name: str) -> str:
     """
     traces = [t.name or t.type for t in fig.data]
     axes = f"x={getattr(traces[0], 'x', 'data')},y={getattr(traces[0], 'y', 'data')}"
-    return f"{name} → plot with {len(traces)} traces [{', '.join(traces[:2])}...]"
+    return f"`{name}` → plot with {len(traces)} traces [{', '.join(traces[:2])}...]"
 
 
 async def summarize_array(arr: np.ndarray, name: str) -> str:
     """Generate array summary optimized for LLM understanding."""
     if arr.size == 0:
-        return f"{name} → empty array"
+        return f"`{name}` → empty array"
         
     # Enhanced semantic hints based on shape, content and name
     if len(arr.shape) == 1:
@@ -170,14 +172,14 @@ async def summarize_array(arr: np.ndarray, name: str) -> str:
         memory_mb = arr.nbytes / (1024 * 1024)
         desc += f" ({memory_mb:.1f}MB)"
         
-    return f"{name} → {desc}"
+    return f"`{name}` → {desc}"
 
 
 async def summarize_sequence(seq: List, name: str) -> str:
     """Generate LLM-friendly sequence description."""
     preview = ', '.join(map(str, seq[:2])) + ("..." if len(seq) > 2 else "")
     desc = f"list of {len(seq)} items: [{preview}]"
-    return f"{name} → {desc}"
+    return f"`{name}` → {desc}"
 
 
 async def summarize_mapping(d: Dict, name: str) -> str:
@@ -189,7 +191,7 @@ async def summarize_mapping(d: Dict, name: str) -> str:
     :return: Name and description in format "name → description"
     """
     if not d:
-        return f"{name} → empty dictionary"
+        return f"`{name}` → empty dictionary"
         
     # Get key and value types
     key_type = type(next(iter(d.keys()))).__name__
@@ -211,7 +213,7 @@ async def summarize_mapping(d: Dict, name: str) -> str:
         preview += "..."
     desc += f" [{preview}]"
         
-    return f"{name} → {desc}"
+    return f"`{name}` → {desc}"
 
 
 async def summarize_callable(func: Callable, name: str) -> str:
@@ -225,25 +227,25 @@ async def summarize_callable(func: Callable, name: str) -> str:
         desc = f"model inference function with ({', '.join(params)})"
     else:
         desc = f"function with parameters ({', '.join(params)})"
-    return f"{name} → {desc}"
+    return f"`{name}` → {desc}"
 
 
 async def summarize_primitive(value: Any, name: str) -> str:
     """Generate concise primitive summary."""
     if isinstance(value, str):
         preview = value[:30] + "..." if len(value) > 30 else value
-        return f"{name} → string of length {len(value)} [{preview}]"
-    return f"{name} → {type(value).__name__}({value})"
+        return f"`{name}` → string of length {len(value)} [{preview}]"
+    return f"`{name}` → {type(value).__name__}({value})"
 
 
 async def summarize_datetime(dt: datetime, name: str) -> str:
     """Generate concise datetime summary."""
-    return f"{name} → timestamp {dt.isoformat()}"
+    return f"`{name}` → timestamp {dt.isoformat()}"
 
 
 async def summarize_path(path: Path, name: str) -> str:
     """Generate concise path summary."""
-    return f"{name} → file path '{path.name}'"
+    return f"`{name}` → file path '{path.name}'"
 
 
 async def summarize_tensor(tensor: torch.Tensor, name: str) -> str:
@@ -284,33 +286,33 @@ async def summarize_tensor(tensor: torch.Tensor, name: str) -> str:
     if tensor.requires_grad:
         desc += " (requires gradient)"
         
-    return f"{name} → {desc}"
+    return f"`{name}` → {desc}"
 
 
 async def summarize_image(img: Image.Image, name: str) -> str:
     """Generate concise image summary."""
-    return f"{name} → {img.mode} image {img.width}×{img.height}"
+    return f"`{name}` → {img.mode} image {img.width}×{img.height}"
 
 
 async def summarize_regex(pattern: re.Pattern, name: str) -> str:
     """Generate concise regex summary."""
-    return f"{name} → pattern '{pattern.pattern}'"
+    return f"`{name}` → pattern '{pattern.pattern}'"
 
 
 async def summarize_generator(gen: Generator, name: str) -> str:
     """Generate LLM-friendly generator description."""
     desc = "data stream generator"
-    return f"{name} → {desc}"
+    return f"`{name}` → {desc}"
 
 
 async def summarize_async_generator(gen: AsyncGenerator, name: str) -> str:
     """Generate concise async generator summary."""
-    return f"{name} → async data stream"
+    return f"`{name}` → async data stream"
 
 
 async def summarize_coroutine(coro: Coroutine, name: str) -> str:
     """Generate concise coroutine summary."""
-    return f"{name} → async task {coro.__name__ if hasattr(coro, '__name__') else 'anonymous'}"
+    return f"`{name}` → async task {coro.__name__ if hasattr(coro, '__name__') else 'anonymous'}"
 
 
 async def summarize_collection(col: Any, name: str) -> str:
@@ -321,17 +323,142 @@ async def summarize_collection(col: Any, name: str) -> str:
         desc = f"queue with {len(col)} elements"
     else:
         desc = f"collection containing {len(col)} items"
-    return f"{name} → {desc}"
+    return f"`{name}` → {desc}"
 
 
 async def summarize_decimal(dec: decimal.Decimal, name: str) -> str:
     """Generate concise decimal summary."""
-    return f"{name} → precise number {dec}"
+    return f"`{name}` → precise number {dec}"
 
 
 async def summarize_uuid(uid: uuid.UUID, name: str) -> str:
     """Generate concise UUID summary."""
-    return f"{name} → unique ID {str(uid)[:8]}..."
+    return f"`{name}` → unique ID {str(uid)[:8]}..."
+
+
+async def summarize_file(file_data: Any, file_type: 'FileType', name: str, path: Optional[Path] = None) -> str:
+    """
+    Generate a concise, LLM-friendly summary of a file's contents.
+    
+    :param file_data: File content to summarize
+    :param file_type: Type of the file from FileType enum
+    :param name: Name/identifier of the file
+    :param path: Optional file path
+    :return: Formatted summary string
+    """
+    # Handle binary file types with size-based summaries
+    if file_type in {FileType.BINARY, FileType.IMAGE, FileType.AUDIO, FileType.VIDEO, FileType.ARCHIVE}:
+        if isinstance(file_data, bytes):
+            size_mb = len(file_data) / (1024 * 1024)
+            return f"`{name}` → {file_type} file{f' at {path.name}' if path else ''} ({size_mb:.1f}MB)"
+        return f"`{name}` → {file_type} file{f' at {path.name}' if path else ''}"
+
+    # Handle structured data files
+    if file_type in {FileType.CSV, FileType.PARQUET}:
+        if isinstance(file_data, (pl.DataFrame, pd.DataFrame)):
+            cols = ', '.join(file_data.columns)
+            rows = len(file_data)
+            return f"`{name}` → {file_type} data with {rows} rows and columns: {cols}"
+        return f"`{name}` → {file_type} data file{f' at {path.name}' if path else ''}"
+
+    if file_type in {FileType.JSON, FileType.YAML}:
+        if isinstance(file_data, dict):
+            top_keys = list(file_data.keys())[:3]
+            preview = ', '.join(top_keys) + ('...' if len(file_data) > 3 else '')
+            return f"`{name}` → {file_type} structure with keys: [{preview}]"
+        return f"`{name}` → {file_type} data file{f' at {path.name}' if path else ''}"
+
+    # Handle code and text files
+    if file_type in {
+        FileType.PYTHON, FileType.JAVASCRIPT, FileType.TYPESCRIPT, FileType.JAVA,
+        FileType.CPP, FileType.CSHARP, FileType.GO, FileType.RUST, FileType.PHP,
+        FileType.RUBY, FileType.SWIFT, FileType.KOTLIN, FileType.SCALA, FileType.R,
+        FileType.SHELL, FileType.SQL
+    }:
+        content = str(file_data)
+        
+        # Extract imports/includes
+        import_patterns = {
+            FileType.PYTHON: r'^(?:from|import)\s+[\w\.*]+',
+            FileType.JAVASCRIPT: r'^(?:import|require)\s*\([^)]+\)|^import\s+.*?from\s+[\'"].*?[\'"]',
+            FileType.TYPESCRIPT: r'^(?:import|require)\s*\([^)]+\)|^import\s+.*?from\s+[\'"].*?[\'"]',
+            FileType.JAVA: r'^import\s+[\w\.]+;',
+            FileType.CPP: r'^#include\s+[<"].*?[>"]',
+            FileType.RUBY: r'^require\s+[\'"].*?[\'"]',
+            FileType.PHP: r'^(?:require|include)(?:_once)?\s+[\'"].*?[\'"];'
+        }
+        
+        # Extract functions/classes
+        func_patterns = {
+            FileType.PYTHON: r'(?:^|\n)(?:def|class)\s+(\w+)',
+            FileType.JAVASCRIPT: r'(?:^|\n)(?:function|class)\s+(\w+)',
+            FileType.TYPESCRIPT: r'(?:^|\n)(?:function|class|interface)\s+(\w+)',
+            FileType.JAVA: r'(?:^|\n)(?:public|private|protected)?\s*(?:class|interface|enum)\s+(\w+)',
+            FileType.CPP: r'(?:^|\n)(?:class|struct|enum)\s+(\w+)',
+            FileType.RUBY: r'(?:^|\n)(?:def|class)\s+(\w+)',
+            FileType.PHP: r'(?:^|\n)(?:function|class)\s+(\w+)'
+        }
+
+        imports = []
+        if pattern := import_patterns.get(file_type):
+            imports = re.findall(pattern, content, re.MULTILINE)[:3]
+            
+        functions = []
+        if pattern := func_patterns.get(file_type):
+            functions = re.findall(pattern, content, re.MULTILINE)[:3]
+
+        summary = f"`{name}` → {file_type} source file\n"
+        if path:
+            if isinstance(path, str):
+                summary += f"(path: '{path}')\n"
+            else:
+                summary += f"(path: '{path.name}')\n"
+                
+        if imports:
+            summary += f"\nImports: {', '.join(imports)[:100]}..."
+        if functions:
+            summary += f"\nDefines: {', '.join(functions)}"
+        
+        loc = len(content.splitlines())
+        summary += f"\n{loc} lines of code"
+        
+        return summary
+
+    # Handle markup and documentation files
+    if file_type in {FileType.HTML, FileType.MARKDOWN, FileType.XML}:
+        content = str(file_data)
+        if file_type == FileType.HTML:
+            title_match = re.search(r'<title>(.*?)</title>', content)
+            h1_match = re.search(r'<h1>(.*?)</h1>', content)
+            title = title_match.group(1) if title_match else h1_match.group(1) if h1_match else None
+        elif file_type == FileType.MARKDOWN:
+            title_match = re.search(r'^#\s+(.*)$', content, re.MULTILINE)
+            title = title_match.group(1) if title_match else None
+        else:  # XML
+            root_match = re.search(r'<(\w+)[^>]*>', content)
+            title = root_match.group(1) if root_match else None
+
+        summary = f"`{name}` → {file_type} document"
+        if path:
+            summary += f" '{path.name}'"
+        if title:
+            summary += f" titled '{title}'"
+        summary += f" ({len(content.splitlines())} lines)"
+        return summary
+
+    # Handle stylesheet files
+    if file_type == FileType.CSS:
+        content = str(file_data)
+        selectors = re.findall(r'([.#]?\w+)\s*{', content)[:5]
+        return f"`{name}` → stylesheet with {len(selectors)} rules [{', '.join(selectors[:3])}...]"
+
+    # Handle configuration files
+    if file_type == FileType.CONFIG:
+        content = str(file_data)
+        return f"`{name}` → configuration file{f' at {path.name}' if path else ''} ({len(content.splitlines())} lines)"
+
+    # Default fallback for unknown types
+    return f"`{name}` → {file_type} file{f' at {path.name}' if path else ''}"
 
 
 SUMMARY_HANDLERS = {

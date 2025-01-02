@@ -29,7 +29,7 @@ def test_llm():
     start_time = time.time()
     llm = LLM(
         pulse_llm_async_inference, 
-        model_name = 'Mixtral-8x22B-Instruct-v0.1',
+        max_tokens = 1000
     )
     logger.info(f"LLM initialization took {time.time() - start_time:.2f}s\n")
     
@@ -78,7 +78,7 @@ def test_llm():
     # Test with long input
     long_input = "Hello, " * 1000  # Create a long input text
     start_time = time.time()
-    response = asyncio.run(llm(long_input))
+    response = llm(long_input)
     logger.info(f"Token-limited call took {time.time() - start_time:.2f}s")
     logger.info(f"Response length: {len(response)}\n")
     

@@ -5,18 +5,20 @@ This module defines the core message types and models used for agent-to-agent
 and agent-to-user communication, including support for attachments and metadata.
 """
 import os
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 from enum import Enum
 from datetime import datetime
-from typing import Dict, Any, List, Union, Optional
+from typing import Dict, Any, List, Optional
 from functools import lru_cache
 import asyncio    
-import orjson
+import json
 import base64
 
 from utils.shared.tokenizer import encode_async
 from utils.shared.tokenizer import slice_text, SliceType
-from utils.serialization import get_compressor, get_decompressor
+
+from agents.storage.models import IDFactory
+from functools import cached_property
 
 
 class Sender(str, Enum):
@@ -62,21 +64,22 @@ class Message(BaseModel):
     :ivar annotations: Configuration and state annotations
     :type annotations: Dict[str, Any]
     """
-    id: Union[int, str] = Field(default_factory = lambda: int.from_bytes(os.urandom(3), 'big') % 1_000_000)
-    sender: Sender = Field(default = Sender.AI, description = "The sender of the message")
-    agent_name: str = Field(default = "default_agent", description = "The name of the agent that sent the message")
-    date: datetime = Field(default_factory = datetime.now, description = "The date of the message")
-    content: str = Field(default = "", description = "Message string content")
-    type: MessageType = Field(default = MessageType.INTERMEDIATE, description = "The type of the message")
+    id: int = Field(default_factory = lambda: IDFactory.next_id())
+    sender: Sender = Field(default = Sender.AI)
+    agent_name: str = Field(default = "default_agent")
+    date: datetime = Field(default_factory = datetime.now)
+    content: str = Field(default = "")
+    type: MessageType = Field(default = MessageType.INTERMEDIATE)
     
-    metadata_ids: List[Union[int, str]] = Field(default = [], description = "Message metadata")
-    file_ids: List[Union[int, str]] = Field(default = [], description = "Message files")
-    annotations: Dict[str, Any] = Field(default = {}, description = "Message annotations for config/state items")
+    # Direct storage of metadata and files (can be objects or serialized data)
+    metadata: List[Any] = Field(default_factory=list)
+    files: List[Any] = Field(default_factory=list)
+    
+    annotations: Dict[str, Any] = Field(default_factory=dict)
+    score: int = Field(default = 0)
 
-    # For vector-based retrieval
-    score: int = Field(default = 0, description = "Score of the file")
-
-
+    _tokens: Optional[List[int]] = PrivateAttr(default=None)
+    
     async def to_json(self) -> str:
         """
         Convert message to JSON string.
@@ -105,19 +108,31 @@ class Message(BaseModel):
         self.date = datetime.fromisoformat(data['date'])
         
 
-    @lru_cache(maxsize = 1)
+    def __hash__(self) -> int:
+        """Make Message hashable for caching"""
+        return hash(self.id)
+    
+    def __eq__(self, other: object) -> bool:
+        """Define equality for hashing"""
+        if not isinstance(other, Message):
+            return False
+        return self.id == other.id
+
     async def tokens(self) -> List[int]:
-        """
-        Get the tokenized representation of the message content.
-        
-        :return: List of token IDs for the message content
-        :rtype: List[int]
-        """
-        return await encode_async(self.content)
+        """Get tokenized content with caching"""
+        if self._tokens is None:
+            self._tokens = await encode_async(self.content)
+        return self._tokens
+    
+    async def token_length(self) -> int:
+        """Get the token length asynchronously"""
+        if self._tokens is None:
+            await self.tokens()
+        return len(self._tokens)
     
     
-    @lru_cache(maxsize = 1)
-    async def __len__(self) -> int:
+    @cached_property
+    async def length(self) -> int:
         """
         Get the length of the message content
         """
@@ -202,9 +217,8 @@ class Message(BaseModel):
         if self.annotations:
             data['annotations'] = self._encode_bytes_in_dict(self.annotations)
         
-        # Use orjson for serialization
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, lambda: orjson.dumps(data).decode('utf-8'))
+        return await loop.run_in_executor(None, lambda: json.dumps(data).decode('utf-8'))
 
     def _encode_bytes_in_dict(self, d: Dict) -> Dict:
         """Helper to encode bytes in dictionary values"""
@@ -243,9 +257,9 @@ class Message(BaseModel):
         :return: New Message instance
         :rtype: Message
         """
-        # Use orjson for deserialization
+        # Use json for deserialization
         loop = asyncio.get_running_loop()
-        data = await loop.run_in_executor(None, orjson.loads, serialized_data)
+        data = await loop.run_in_executor(None, json.loads, serialized_data)
         
         # Convert strings back to proper types
         data['sender'] = Sender(data['sender'])
@@ -259,8 +273,3 @@ class Message(BaseModel):
             data['annotations'] = cls._decode_bytes_in_dict(data['annotations'])
         
         return cls(**data)
-
-    async def token_length(self) -> int:
-        """Get the token length asynchronously"""
-        tokens = await self.tokens()
-        return len(tokens)

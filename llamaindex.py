@@ -48,8 +48,7 @@ class PulseEmbedding(BaseEmbedding):
     def _get_text_embeddings(self, texts: List[str]) -> List[List[float]]:
         """Get multiple text embeddings synchronously"""
         start = time.time()
-        logger.debug(f"Getting embeddings for {len(texts)} texts synchronously")
-        
+       
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
@@ -180,6 +179,7 @@ class PulseEmbedding(BaseEmbedding):
         result = await self._embedder(query)
         return result[0]
 
+
 class PulseLlamaLLM(CustomLLM, BaseModel):
     """Adapter for using Pulse LLM with LlamaIndex"""
     
@@ -192,21 +192,21 @@ class PulseLlamaLLM(CustomLLM, BaseModel):
         super().__init__(**data)
         self._pulse_llm = LLM(
             pulse_llm_async_inference,
-            model_name=self.model_name,
-            input_tokens=self.context_window,
-            max_tokens=self.max_new_tokens
+            model_name = self.model_name,
+            input_tokens = self.context_window,
+            max_tokens = self.max_new_tokens
         )
 
     @property
     def metadata(self) -> LLMMetadata:
         """Return LLM metadata in the format LlamaIndex expects"""
         return LLMMetadata(
-            context_window=self.context_window,
-            max_new_tokens=self.max_new_tokens,
-            model_name=self.model_name,
-            is_chat_model=False,
-            is_function_calling_model=False,
-            model_backend="custom"
+            context_window = self.context_window,
+            max_new_tokens = self.max_new_tokens,
+            model_name = self.model_name,
+            is_chat_model = False,
+            is_function_calling_model = False,
+            model_backend = "custom"
         )
 
     def complete(self, prompt: str, **kwargs) -> CompletionResponse:

@@ -6,9 +6,9 @@ Provides easy access to core agent components and utilities.
 
 from agents.agent.models import Agent
 from agents.state.models import AgentState
-from agents.messages.message import Message, MessageType, Sender
-from agents.messages.file import File
-from agents.messages.metadata import Metadata
+from agents.storage.message import Message, MessageType, Sender
+from agents.storage.file import File
+from agents.storage.metadata import Metadata
 
 from agents.config.models import (
     AgentConfig,

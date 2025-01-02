@@ -23,9 +23,7 @@ import json
 from pathlib import Path
 import aiofiles
 
-from agents.messages.message import (
-    Message, Sender
-)
+from agents.storage.message import Message, Sender
 
 from agents.config.models import AgentConfig, AgentStatus, Logging
 
@@ -35,6 +33,7 @@ from agents.state.models import AgentState
 from llm import (
     LLM,
     gemini_llm_async_inference,
+    BaseEmbeddingFunction
 )
 
 from agents.monitor.logger import AgentLogger, AgentLogHandler
@@ -43,6 +42,10 @@ from agents.monitor.agent_logs import AgentLog
 from agents.monitor.wrappers.logging import logging_agent_wrapper
 from agents.monitor.wrappers.langfuse import langfuse_agent_wrapper
 from agents.monitor.wrappers.default import default_agent_wrapper
+
+from agents.config.models import RetrievalType
+
+from agents.storage.context import Context, ContextType
 
 
 def conditional_logging(capture_input = False):
@@ -102,10 +105,12 @@ class Agent(BaseModel):
     :type agent_status: AgentStatus
     :ivar session_id: Unique identifier for the session
     :type session_id: str
+    :ivar embedding_function: Function used to generate embeddings across all stores
+    :type embedding_function: Optional[BaseEmbeddingFunction]
     """
     name: str = Field(default = "Agent")
     type: str = Field(default = "base")
-    description: Optional[str] = None
+    description: Optional[str] = Field(default = None)
     
     state: AgentState = Field(default_factory = AgentState)
     config: AgentConfig = Field(default_factory = AgentConfig)
@@ -124,19 +129,32 @@ class Agent(BaseModel):
     
     session_id: str = Field(default = str(uuid4()), exclude = True)
     
+    embedding_function: Optional[BaseEmbeddingFunction] = Field(
+        default = None,
+        description = "Function used to generate embeddings across all stores"
+    )
+    
     
     class Config:
         arbitrary_types_allowed = True
         extra = "forbid"
     
-    def __init__(self, *args, **kwargs):
+    def __init__(self, **kwargs):
         """
         Initialize an agent instance.
         
         :param args: Positional arguments
         :param kwargs: Keyword arguments
         """
-        super().__init__(*args, **kwargs)
+        # Extract embedding function before super init
+        embedding_function = kwargs.get('embedding_function')
+        
+        # If embedding function provided, create state with it
+        if embedding_function:
+            kwargs['state'] = AgentState(embedding_function=embedding_function)
+            
+        super().__init__(**kwargs)
+        
         if self.logging:
             self.agent_log = AgentLog(
                 session_id = self.session_id,
@@ -193,71 +211,161 @@ class Agent(BaseModel):
         limit: Optional[int] = None,
         ids: Optional[List[Union[str, Any]]] = None
     ) -> List[Message]:
-        """
-        Retrieve messages from the agent's history.
-        
-        :param limit: Maximum number of messages to return
-        :type limit: Optional[int]
-        :param ids: List of specific message IDs to retrieve
-        :type ids: Optional[List[Union[str, Any]]]
-        :return: List of messages
-        :rtype: List[Message]
-        """
-        # Use state's message store for retrieval
+        """Get messages from context store"""
         filter_dict = {}
         if ids:
             filter_dict["id"] = {"$in": ids}
             
-        messages = await self.state.obtain_message_context(
-            query = None,  # No query needed for direct retrieval
-            context_config = self.config.context,
-            filter = filter_dict,
-            truncate = False
+        contexts = await self.state.get_context(
+            query="",
+            context_type=ContextType.PROCESS,
+            limit=limit or 100
         )
         
-        if limit:
-            messages = messages[:limit]
-            
+        # Convert contexts to messages
+        messages = []
+        for ctx in contexts:
+            if ctx.context_type in ["input", "output"]:
+                messages.append(Message(
+                    content=ctx.content.split("Output: ")[-1],
+                    sender=ctx.sender,
+                    agent_name=ctx.agent,
+                    date=ctx.date
+                ))
+        
         return messages
 
+
+    async def process_message(
+        self, 
+        message: Message,
+        **kwargs
+    ) -> Message:
+        """Process an incoming message"""
+        # Get relevant context using context store
+        context_entries = await self.state.get_context(
+            query = message.content,
+            limit = self.config.context_config.item_count
+        )
+        
+        # Format context for LLM
+        context_text = "\n\n".join(
+            f"Previous context ({c.type.value}):\n{c.content}"
+            for c in context_entries
+        )
+        
+        # Generate response
+        response = await self.llm(
+            f'{context_text}\n\n{message.content}',
+            **kwargs
+        )
+        
+        # Store response as process context
+        process_context = Context(
+            type=ContextType.PROCESS,
+            content=f"Input: {message.content}\nOutput: {response}",
+            sender=Sender.AI,
+            agent=self.name,
+            context_type="response",
+            date=datetime.now()
+        )
+        await self.state.add_context(process_context)
+        
+        return Message(
+            content=response,
+            sender=Sender.AI,
+            agent_name=self.name
+        )
+
+
+    async def process_historical_messages(
+        self,
+        query: Optional[str] = None,
+        truncate: bool = True
+    ) -> str:
+        """
+        Process historical messages and generate a response.
+        Optimized for parallel processing and batch operations.
+        
+        :param query: Optional search query for relevant messages
+        :type query: Optional[str]
+        :param retrieval_strategy: Strategy for retrieving messages
+        :type retrieval_strategy: RetrievalType
+        :param truncate: Whether to truncate messages
+        :type truncate: bool
+        :return: Formatted context summary
+        :rtype: str
+        """
+        # Split context config for historical and relevant using division operator
+        historical_config = self.state.context_config / 2
+        relevant_config = self.state.context_config / 2
+        
+        # Get historical messages
+        historical_messages = await self.state.obtain_message_context(
+            query = query,
+            context_config = historical_config,
+            truncate = truncate,
+            retrieval_strategy = RetrievalType.CHRONOLOGICAL
+        )
+        
+        # Get relevant messages if query provided
+        relevant_messages = []
+        relevant_messages = await self.state.obtain_message_context(
+            query = query,
+            context_config = relevant_config,
+            truncate = truncate,
+            retrieval_strategy = RetrievalType.SIMILARITY
+        )
+
+        # Batch process message formatting
+        async def format_messages(messages: List[Message], prefix: str) -> str:
+            if not messages:
+                return ""
+            
+            formatted = []
+            for msg in messages:
+                parts = []
+               
+                if msg.agent_name != self.name:
+                    parts.append(f"Message from agent {msg.agent_name}")
+                if prefix == "Relevant":  # Only add date for relevant messages
+                    parts.append(f"Date: {msg.date}")
+                parts.append(f"Content: {msg.content}")
+                formatted.append("\n".join(parts))
+            
+            return f"\n{prefix} context:\n" + "\n\n".join(formatted)
+
+        # Format both message types
+        historical_summary = await format_messages(historical_messages, "Historical")
+        relevant_summary = await format_messages(relevant_messages, "Relevant")
+        
+        # Combine summaries
+        summary = ""
+        if historical_summary:
+            summary += historical_summary
+        if relevant_summary:
+            summary += "\n" + relevant_summary if summary else relevant_summary
+        
+        return summary
+    
 
     @conditional_logging()
     async def send_message(
         self, 
-        input_message: Message,
-        state: Optional[AgentState] = None,
+        message: Message,
+        **kwargs
     ) -> Message:
-        """
-        Send a message to the agent and get a response.
-        
-        :param input_message: Message to send
-        :type input_message: Message
-        :param state: Optional state override
-        :type state: Optional[AgentState]
-        :return: Response message
-        :rtype: Message
-        """
-        prompt = ""
-        if self.llm.system_prompt:
-            prompt += self.llm.system_prompt
-        
-        if self.config.task_prompt:
-            prompt += self.config.task_prompt
-        
-        if self.state.context:
-            prompt += self.state.context
-        
-        if input_message:
-            prompt += input_message.content
-        
-        response = await self.llm(prompt)
-        response_message = Message(
-            content = response,
-            sender = Sender.AI,
-            agent_name = self.name,
-        )
-        
-        return response_message
+        """Process a message and return the response"""
+        try:
+            # Obtains past chat context
+            pass
+            
+            # Process message
+            response = await self.process_message(message, **kwargs)
+            return response
+            
+        except Exception as e:
+            raise
 
     
     def sync_send_message(
@@ -346,15 +454,6 @@ class Agent(BaseModel):
         """
         self.messages = []
 
-
-    async def update_context(self, **kwargs) -> None:
-        """
-        Update the agent's context with new values.
-        
-        :param kwargs: Key-value pairs to update in context
-        """
-        self.state.context.update(kwargs)
-
     
     def __repr__(self) -> str:
         """
@@ -363,7 +462,7 @@ class Agent(BaseModel):
         :return: String representation
         :rtype: str
         """
-        return f'Agent(state={self.state}, config={self.config}, num_messages={len(self.messages)})'
+        return f'Agent(state={self.state}, config={self.config})'
     
     
     def __str__(self) -> str:
@@ -373,7 +472,7 @@ class Agent(BaseModel):
         :return: String representation
         :rtype: str
         """
-        return f'Agent(state={self.state}, config={self.config}, num_messages={len(self.messages)})'
+        return f'Agent(state={self.state}, config={self.config})'
 
 
     async def serialize(self, path: Union[str, Path]) -> None:
@@ -416,7 +515,7 @@ class Agent(BaseModel):
         path = Path(path)
         
         # Load core agent data
-        async with aiofiles.open(path / "agent.json", "r") as f:
+        async with aiofiles.open(path / "agent.json", "rb") as f:
             agent_data = json.loads(await f.read())
         
         # Create base agent instance
@@ -434,3 +533,40 @@ class Agent(BaseModel):
         await agent.state.deserialize(path / "state")
         
         return agent
+
+
+    async def get_context(
+        self,
+        query: str,
+    ) -> List[str]:
+        """
+        Get relevant context for query using agent's state context config.
+        
+        :param query: Search query
+        :type query: str
+        :return: List of relevant context chunks
+        :rtype: List[str]
+        """
+        chunks = await self.state.obtain_file_chunk_context(
+            query=query,
+            context_config=self.state.context_config
+        )
+        return chunks
+
+    async def text(self) -> str:
+        """Get formatted log text"""
+        if not self.agent_log:
+            return "No logs available"
+        return await self.agent_log.text()
+
+    async def input_text(self) -> str:
+        """Get input log text"""
+        if not self.agent_log:
+            return "No input logs available"
+        return await self.agent_log.input_text()
+
+    async def output_text(self) -> str:
+        """Get output log text"""
+        if not self.agent_log:
+            return "No output logs available"
+        return await self.agent_log.output_text()

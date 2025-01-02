@@ -16,7 +16,11 @@ import os
 from datetime import datetime
 import contextvars
 
-from agents.messages.message import Message
+from agents.storage.message import Message
+from agents.storage.file import File
+from agents.storage.metadata import Metadata
+
+from llm import BaseEmbeddingFunction
 
 
 class WorkerThreadPoolExecutor(ThreadPoolExecutor):
@@ -49,7 +53,6 @@ class WorkerThreadPoolExecutor(ThreadPoolExecutor):
         context = contextvars.copy_context()
         return super().submit(context.run, fn, *args, **kwargs)
 
-
 class BaseVectorStore(ABC):
     """
     Abstract base class for vector storage implementations.
@@ -67,27 +70,48 @@ class BaseVectorStore(ABC):
 
     data: Dict[Any, Any] = {}
 
-    def __init__(self):
+    def __init__(
+        self,
+        embedding_function: Optional[BaseEmbeddingFunction] = None,
+        **kwargs
+    ):
+        """Initialize base vector store.
+        
+        :param embedding_function: Function to generate embeddings
+        :type embedding_function: Optional[BaseEmbeddingFunction]
         """
-        Initialize vector store with context-aware thread pool executor.
-        """
+        self.embedding_function = embedding_function
+        self.data = {}
+
         with self.__class__._instance_lock:
             if self.__class__._executor is None:
                 self.__class__._executor = WorkerThreadPoolExecutor(
                     max_workers = min(32, (os.cpu_count() or 1) + 4)
                 )
                 
-    async def filter_recent(
+    async def search_history(
         self,
+        query: Union[str, Message, File, Metadata] = None,
+        filter: Optional[Dict[str, Any]] = None,
+        k: Optional[int] = None,
         start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None,
-        filter: Union[Dict[str, Any], None] = None
-    ) -> List[Dict[str, Any]]:
+        end_date: Optional[datetime] = None
+    ) -> List[Any]:
         """
-        Filter stored items by their addition date.
+        Search historical items.
         
-        :return: List of metadata entries within the date range
-        :rtype: List[Dict[str, Any]]
+        :param query: Optional search query
+        :type query: Union[str, Message, File, Metadata]
+        :param filter: Optional filter criteria
+        :type filter: Optional[Dict[str, Any]]
+        :param k: Maximum number of results
+        :type k: Optional[int]
+        :param start_date: Optional start date filter
+        :type start_date: Optional[datetime]
+        :param end_date: Optional end date filter
+        :type end_date: Optional[datetime]
+        :return: List of historical items
+        :rtype: List[Any]
         """
         loop = asyncio.get_running_loop()
         
@@ -99,15 +123,19 @@ class BaseVectorStore(ABC):
                        (not end_date or datetime.fromisoformat(val.date) < end_date)
                 ]
                 return await loop.run_in_executor(None,
-                    lambda: sorted(filtered, key = lambda x: datetime.fromisoformat(x.date))
+                    lambda: sorted(filtered, key = lambda x: x.date)
                 )
             else:
                 return await loop.run_in_executor(None,
-                    lambda: sorted(self.data.values(), key = lambda x: datetime.fromisoformat(x.date))
+                    lambda: sorted(self.data.values(), key = lambda x: x.date)
                 )
         data = await search_dates()
         if filter:
             data = [item for item in data if all(item[attr] == filter[attr] for attr in filter)]
+        
+        # Filters for n entries according to search type
+        if k:
+            data = data[:k]
         
         return data
 
@@ -211,19 +239,22 @@ class BaseVectorStore(ABC):
     
     @abstractmethod
     async def search_relevant(
-        self, 
-        query: Union[str, list[str]], 
-        k: int = 5
-    ) -> List[Dict[str, Any]]:
+        self,
+        query: Union[str, Message, File, Metadata],
+        filter: Optional[Dict[str, Any]] = None,
+        k: Optional[int] = None
+    ) -> List[Any]:
         """
-        Search for similar embeddings in the vector store.
+        Search for relevant items.
         
-        :param query: Query string or list of queries
-        :type query: Union[str, list[str]]
-        :param k: Number of results to return
-        :type k: int
-        :return: List of metadata for similar embeddings
-        :rtype: List[Dict[str, Any]]
+        :param query: Search query
+        :type query: Union[str, Message, File, Metadata]
+        :param filter: Optional filter criteria
+        :type filter: Optional[Dict[str, Any]]
+        :param k: Maximum number of results to return
+        :type k: Optional[int]
+        :return: List of relevant items
+        :rtype: List[Any]
         """
         pass
     
@@ -237,25 +268,6 @@ class BaseVectorStore(ABC):
         """
         pass
     
-    @abstractmethod
-    async def save(self, path: Union[str, Path]) -> None:
-        """
-        Save the vector store to disk.
-        
-        :param path: Path to save the vector store
-        :type path: Union[str, Path]
-        """
-        pass
-    
-    @abstractmethod
-    async def load(self, path: Union[str, Path]) -> None:
-        """
-        Load the vector store from disk.
-        
-        :param path: Path to load the vector store from
-        :type path: Union[str, Path]
-        """
-        pass
 
     @abstractmethod
     async def serialize(self, path: Union[str, Path]) -> None:
@@ -281,8 +293,8 @@ class BaseVectorStore(ABC):
         """
         pass
 
-
-    async def __len__(self) -> int:
+    @property
+    async def length(self) -> int:
         """
         Return the number of elements in the vector store.
         
@@ -290,3 +302,10 @@ class BaseVectorStore(ABC):
         :rtype: int
         """
         return len(self.data)
+    
+
+    async def get(self, id: Any) -> Any:
+        """
+        Get an item by its ID.
+        """
+        return self.data[id]

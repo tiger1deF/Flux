@@ -3,12 +3,12 @@ Message Components
 
 Message Models
 ------------
-.. automodule:: agents.messages.models
+.. automodule:: agents.storage.models
    :synopsis: Core message types and models for agent communication.
 
 Base Message
 ~~~~~~~~~~
-.. autoclass:: agents.messages.models.Message
+.. autoclass:: agents.storage.models.Message
    :members:
    :undoc-members:
    :show-inheritance:
@@ -17,7 +17,7 @@ Base Message
 
 File Handling
 -----------
-.. autoclass:: agents.messages.models.File
+.. autoclass:: agents.storage.models.File
    :members:
    :undoc-members:
    :show-inheritance:
@@ -26,7 +26,7 @@ File Handling
 
 Message Types
 -----------
-.. autoclass:: agents.messages.models.Sender
+.. autoclass:: agents.storage.models.Sender
    :members:
    :undoc-members:
    :show-inheritance:
@@ -39,7 +39,7 @@ Basic Usage
 
 .. code-block:: python
 
-   from agents.messages.models import Message, Sender
+   from agents.storage.models import Message, Sender
    
    # Create a user message
    message = Message(
@@ -56,7 +56,7 @@ File Attachments
 
 .. code-block:: python
 
-   from agents.messages.models import File
+   from agents.storage.models import File
    
    # Create a file attachment
    file = File(
